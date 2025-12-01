@@ -7,7 +7,7 @@
         "data": {
           "username": "Používateľské meno",
           "password": "Heslo",
-          "scan_interval": "Interval aktualizácie (minúty)"
+          "scan_interval": "Interval aktualizácie"
         }
       },
       "point_of_delivery": {
@@ -50,7 +50,7 @@
         "title": "Možnosti SSD IMS",
         "description": "Aktualizovať nastavenia integrácie",
         "data": {
-          "scan_interval": "Interval aktualizácie (minúty)",
+          "scan_interval": "Interval aktualizácie",
           "enable_supply_sensors": "Povoliť senzory dodávky"
         }
       }

@@ -1,4 +1,5 @@
 """Configuration flow for SSD IMS integration."""
+
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -13,13 +14,22 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
 from .api_client import SsdImsApiClient
-from .const import (CONF_ENABLE_HISTORY_IMPORT,
-                    CONF_ENABLE_SUPPLY_SENSORS, CONF_HISTORY_DAYS,
-                    CONF_POD_NAME_MAPPING, CONF_POINT_OF_DELIVERY,
-                    CONF_SCAN_INTERVAL, DEFAULT_ENABLE_HISTORY_IMPORT,
-                    DEFAULT_ENABLE_SUPPLY_SENSORS,
-                    DEFAULT_HISTORY_DAYS, DEFAULT_SCAN_INTERVAL, DOMAIN, NAME,
-                    POD_NAME_MAX_LENGTH, POD_NAME_PATTERN, SCAN_INTERVAL_OPTIONS)
+from .const import (
+    CONF_ENABLE_HISTORY_IMPORT,
+    CONF_ENABLE_SUPPLY_SENSORS,
+    CONF_HISTORY_DAYS,
+    CONF_POD_NAME_MAPPING,
+    CONF_POINT_OF_DELIVERY,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_ENABLE_HISTORY_IMPORT,
+    DEFAULT_ENABLE_SUPPLY_SENSORS,
+    DEFAULT_HISTORY_DAYS,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    NAME,
+    POD_NAME_MAX_LENGTH,
+    SCAN_INTERVAL_OPTIONS,
+)
 from .models import PointOfDelivery
 
 _LOGGER = logging.getLogger(__name__)
@@ -209,9 +219,7 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._enable_history_import = user_input.get(
                 CONF_ENABLE_HISTORY_IMPORT, DEFAULT_ENABLE_HISTORY_IMPORT
             )
-            self._history_days = user_input.get(
-                CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS
-            )
+            self._history_days = user_input.get(CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS)
 
             # Create config entry
             config_data = {
@@ -221,7 +229,9 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_POINT_OF_DELIVERY: self._selected_pods,
                 CONF_POD_NAME_MAPPING: self._pod_name_mapping,
                 CONF_ENABLE_SUPPLY_SENSORS: self._enable_supply_sensors,
-                CONF_HISTORY_DAYS: self._history_days if self._enable_history_import else 0,
+                CONF_HISTORY_DAYS: self._history_days
+                if self._enable_history_import
+                else 0,
             }
 
             return self.async_create_entry(
@@ -286,7 +296,10 @@ class SsdImsOptionsFlow(config_entries.OptionsFlow):
 
             # Update coordinator configuration and trigger refresh if needed
             from .coordinator import SsdImsDataCoordinator
-            coordinator: SsdImsDataCoordinator = self.hass.data[DOMAIN][self.config_entry.entry_id]
+
+            coordinator: SsdImsDataCoordinator = self.hass.data[DOMAIN][
+                self.config_entry.entry_id
+            ]
             await coordinator.update_config(new_data)
 
             return self.async_create_entry(title="", data={})

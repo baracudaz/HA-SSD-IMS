@@ -1,4 +1,5 @@
 """Constants for SSD IMS integration."""
+
 from datetime import datetime, timedelta
 from typing import Final, Tuple
 
@@ -29,10 +30,10 @@ DEFAULT_HISTORY_DAYS: Final = 30  # Import last 30 days of past data by default
 # Options - Data is only available up to yesterday and released once per day
 # So polling frequently doesn't make sense
 SCAN_INTERVAL_OPTIONS: Final = {
-    180: "3 hours",
+    5: "5 minutes (debugging only)",
     360: "6 hours (recommended)",
     720: "12 hours",
-    1440: "24 hours (once per day)",
+    1440: "24 hours",
 }
 
 # API delay configuration - random between min and max
@@ -42,7 +43,9 @@ API_DELAY_MAX: Final = 3  # maximum random delay in seconds
 # API endpoints
 API_BASE_URL: Final = "https://ims.ssd.sk/api"
 API_LOGIN: Final = f"{API_BASE_URL}/account/login"
-API_PODS: Final = f"{API_BASE_URL}/consumption-production/profile-data/get-points-of-delivery"
+API_PODS: Final = (
+    f"{API_BASE_URL}/consumption-production/profile-data/get-points-of-delivery"
+)
 API_DATA: Final = f"{API_BASE_URL}/consumption-production/profile-data"
 API_CHART: Final = f"{API_BASE_URL}/consumption-production/profile-data/chart-data"
 
@@ -74,6 +77,7 @@ def _calculate_yesterday_range(now: datetime) -> Tuple[datetime, datetime]:
     # End time: today's midnight converted to UTC
     # In +01:00 timezone, 2025-11-29T00:00:00+01:00 = 2025-11-28T23:00:00Z
     from datetime import timezone
+
     period_end = today_midnight.astimezone(timezone.utc)
 
     return period_start, period_end
@@ -81,18 +85,6 @@ def _calculate_yesterday_range(now: datetime) -> Tuple[datetime, datetime]:
 
 # Time periods configuration
 PERIOD_YESTERDAY: Final = "yesterday"
-
-# Time periods configuration with callbacks for date range calculation
-TIME_PERIODS_CONFIG: Final = {
-    PERIOD_YESTERDAY: {
-        "display_name": "",  # No period suffix in sensor names
-        "description": "Previous day",
-        "calculate_range": _calculate_yesterday_range,
-    },
-}
-
-# List of time periods (keys from config)
-TIME_PERIODS: Final = list(TIME_PERIODS_CONFIG.keys())
 
 # POD naming validation
 POD_NAME_MAX_LENGTH: Final = 50

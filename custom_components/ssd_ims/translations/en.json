@@ -7,7 +7,7 @@
         "data": {
           "username": "Username",
           "password": "Password",
-          "scan_interval": "Update interval (minutes)"
+          "scan_interval": "Update interval"
         }
       },
       "point_of_delivery": {
@@ -50,7 +50,7 @@
         "title": "SSD IMS Options",
         "description": "Update integration settings",
         "data": {
-          "scan_interval": "Update interval (minutes)",
+          "scan_interval": "Update interval",
           "enable_supply_sensors": "Enable supply sensors"
         }
       }

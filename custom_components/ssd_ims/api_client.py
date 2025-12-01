@@ -1,4 +1,5 @@
 """API client for SSD IMS integration."""
+
 import asyncio
 import logging
 from datetime import datetime
@@ -8,25 +9,32 @@ from aiohttp import ClientError, ClientSession, ClientTimeout
 from pydantic import ValidationError
 
 from .const import API_CHART, API_DATA, API_LOGIN, API_PODS
-from .models import (AuthResponse, ChartData, MeteringData,
-                     MeteringDataResponse, PointOfDelivery)
+from .models import (
+    AuthResponse,
+    ChartData,
+    MeteringData,
+    MeteringDataResponse,
+    PointOfDelivery,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _log_data_sample(data: Dict[str, Any], field_name: str, max_sample_size: int = 20) -> str:
+def _log_data_sample(
+    data: Dict[str, Any], field_name: str, max_sample_size: int = 20
+) -> str:
     """Create a debug-friendly sample of problematic data."""
     if field_name not in data:
         return f"Field '{field_name}' not found in data"
-    
+
     field_data = data[field_name]
     if not isinstance(field_data, list):
         return f"Field '{field_name}' is not a list: {type(field_data).__name__} = {repr(field_data)}"
-    
+
     total_len = len(field_data)
     if total_len == 0:
         return f"Field '{field_name}' is empty list"
-    
+
     # Find problematic entries (None values are now valid for supply fields)
     problems = []
     for i, val in enumerate(field_data):
@@ -36,13 +44,13 @@ def _log_data_sample(data: Dict[str, Any], field_name: str, max_sample_size: int
             problems.append(i)
         elif not isinstance(val, (int, float, str)):
             problems.append(i)
-    
+
     sample_info = f"length={total_len}"
     if problems:
         sample_info += f", problems_at={problems[:10]}"
         if len(problems) > 10:
-            sample_info += f"+{len(problems)-10}more"
-    
+            sample_info += f"+{len(problems) - 10}more"
+
     # Show a small sample around problematic areas
     if problems:
         sample_ranges = []
@@ -57,7 +65,7 @@ def _log_data_sample(data: Dict[str, Any], field_name: str, max_sample_size: int
         sample_info += f", sample={field_data[:sample_size]}"
         if total_len > sample_size:
             sample_info += "..."
-    
+
     return sample_info
 
 
@@ -135,7 +143,7 @@ class SsdImsApiClient:
             if response.status == 401:
                 _LOGGER.warning("Session expired - 401 unauthorized")
                 return True
-            
+
             content_type = response.headers.get("content-type", "").lower()
             # Check if response is HTML (session expired) instead of JSON
             if "text/html" in content_type and response.status != 200:
@@ -170,30 +178,32 @@ class SsdImsApiClient:
             except ClientError as e:
                 if attempt == max_retries - 1:
                     raise
-                
-                wait_time = 2 ** attempt  # exponential backoff: 1s, 2s, 4s
+
+                wait_time = 2**attempt  # exponential backoff: 1s, 2s, 4s
                 _LOGGER.warning(
                     "Network error on attempt %d/%d for %s: %s. Retrying in %ds...",
-                    attempt + 1, max_retries, url, e, wait_time
+                    attempt + 1,
+                    max_retries,
+                    url,
+                    e,
+                    wait_time,
                 )
                 await asyncio.sleep(wait_time)
-            except Exception as e:
+            except Exception:
                 # Don't retry non-network errors
                 raise
 
-    async def _make_authenticated_request(
-        self, method: str, url: str, **kwargs
-    ) -> Any:
+    async def _make_authenticated_request(self, method: str, url: str, **kwargs) -> Any:
         """Make an authenticated request with automatic re-authentication on session expiry."""
         if not self._authenticated:
             raise Exception("Not authenticated")
 
         # Add required headers for SSD IMS API compatibility
-        headers = kwargs.get('headers', {})
-        headers['X-Requested-With'] = 'XMLHttpRequest'
+        headers = kwargs.get("headers", {})
+        headers["X-Requested-With"] = "XMLHttpRequest"
         # Add accept header to ensure JSON response
-        headers['Accept'] = 'application/json, text/plain, */*'
-        kwargs['headers'] = headers
+        headers["Accept"] = "application/json, text/plain, */*"
+        kwargs["headers"] = headers
 
         try:
             async with self._session.request(
@@ -249,7 +259,11 @@ class SsdImsApiClient:
         try:
             _LOGGER.debug("Fetching points of delivery from API")
             data = await self._retry_request_with_backoff("GET", API_PODS)
-            _LOGGER.debug("POD API response type: %s, length: %s", type(data), len(data) if isinstance(data, list) else "N/A")
+            _LOGGER.debug(
+                "POD API response type: %s, length: %s",
+                type(data),
+                len(data) if isinstance(data, list) else "N/A",
+            )
             pods = [PointOfDelivery(**pod) for pod in data]
             _LOGGER.debug("Retrieved %d points of delivery", len(pods))
             return pods
@@ -377,7 +391,7 @@ class SsdImsApiClient:
             _LOGGER.debug(
                 "Chart data request: validFromDate=%s, validToDate=%s",
                 payload["validFromDate"],
-                payload["validToDate"]
+                payload["validToDate"],
             )
 
             data = await self._retry_request_with_backoff(
@@ -422,14 +436,28 @@ class SsdImsApiClient:
                     pod_id,
                     from_date,
                     to_date,
-                    {k: f"{type(v).__name__}[{len(v) if isinstance(v, list) else 'scalar'}]" 
-                     for k, v in data.items() if k in ['meteringDatetime', 'actualConsumption', 
-                                                       'actualSupply', 'idleConsumption', 'idleSupply']},
-                    str(e)
+                    {
+                        k: f"{type(v).__name__}[{len(v) if isinstance(v, list) else 'scalar'}]"
+                        for k, v in data.items()
+                        if k
+                        in [
+                            "meteringDatetime",
+                            "actualConsumption",
+                            "actualSupply",
+                            "idleConsumption",
+                            "idleSupply",
+                        ]
+                    },
+                    str(e),
                 )
                 # Log detailed information about problematic data
                 _LOGGER.error("Raw chart data field analysis:")
-                for field in ['actualConsumption', 'actualSupply', 'idleConsumption', 'idleSupply']:
+                for field in [
+                    "actualConsumption",
+                    "actualSupply",
+                    "idleConsumption",
+                    "idleSupply",
+                ]:
                     sample_info = _log_data_sample(data, field)
                     _LOGGER.error("  %s: %s", field, sample_info)
                 raise Exception(f"Chart data validation failed: {str(e)}") from e

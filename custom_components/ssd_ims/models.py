@@ -1,4 +1,5 @@
 """Data models for SSD IMS integration."""
+
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -128,7 +129,13 @@ class ChartData(BaseModel):
     )
     sum_idle_supply: Optional[float] = Field(alias="sumIdleSupply", default=0.0)
 
-    @field_validator('actual_consumption', 'actual_supply', 'idle_consumption', 'idle_supply', mode='before')
+    @field_validator(
+        "actual_consumption",
+        "actual_supply",
+        "idle_consumption",
+        "idle_supply",
+        mode="before",
+    )
     @classmethod
     def validate_float_lists(cls, v: Any, info: ValidationInfo) -> List[float]:
         """Validate float lists with enhanced error messages."""
@@ -139,8 +146,10 @@ class ChartData(BaseModel):
             try:
                 return [float(v)]
             except (ValueError, TypeError) as exc:
-                raise ValueError(f"Field '{info.field_name}': Expected list or numeric value, got {type(v).__name__}: {v}") from exc
-        
+                raise ValueError(
+                    f"Field '{info.field_name}': Expected list or numeric value, got {type(v).__name__}: {v}"
+                ) from exc
+
         # Process list values
         result = []
         for i, item in enumerate(v):
@@ -154,19 +163,25 @@ class ChartData(BaseModel):
                     f"Field '{info.field_name}' at index {i}: "
                     f"Cannot convert '{item}' (type: {type(item).__name__}) to float. "
                     f"Raw data at position {i}: {repr(item)}. "
-                    f"Context around position {i}: {v[max(0, i-2):i+3]}. "
+                    f"Context around position {i}: {v[max(0, i - 2) : i + 3]}. "
                     f"Original error: {str(e)}"
                 ) from e
-        
+
         return result
 
-    @field_validator('sum_actual_consumption', 'sum_actual_supply', 'sum_idle_consumption', 'sum_idle_supply', mode='before')
+    @field_validator(
+        "sum_actual_consumption",
+        "sum_actual_supply",
+        "sum_idle_consumption",
+        "sum_idle_supply",
+        mode="before",
+    )
     @classmethod
     def validate_sum_fields(cls, v: Any, info: ValidationInfo) -> float:
         """Validate sum fields with enhanced error messages."""
         if v is None:
             return 0.0
-        
+
         try:
             return float(v)
         except (ValueError, TypeError) as e:
@@ -178,7 +193,7 @@ class ChartData(BaseModel):
 
 class AggregatedData(BaseModel):
     """Aggregated data for different time periods.
-    
+
     Note: This model is flexible and can contain any time period keys
     as defined in TIME_PERIODS_CONFIG. The structure is:
     {
@@ -189,7 +204,7 @@ class AggregatedData(BaseModel):
         ...
     }
     """
-    
+
     # Allow arbitrary fields for dynamic time periods
     class Config:
         extra = "allow"

@@ -1,4 +1,5 @@
 """SSD IMS Home Assistant integration."""
+
 import logging
 import re
 
@@ -8,12 +9,18 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
 from .api_client import SsdImsApiClient
-from .const import (CONF_ENABLE_SUPPLY_SENSORS,
-                    CONF_HISTORY_DAYS, CONF_POD_NAME_MAPPING,
-                    CONF_POINT_OF_DELIVERY, CONF_SCAN_INTERVAL,
-                    DEFAULT_ENABLE_SUPPLY_SENSORS,
-                    DEFAULT_HISTORY_DAYS, DEFAULT_POINT_OF_DELIVERY,
-                    DEFAULT_SCAN_INTERVAL, DOMAIN)
+from .const import (
+    CONF_ENABLE_SUPPLY_SENSORS,
+    CONF_HISTORY_DAYS,
+    CONF_POD_NAME_MAPPING,
+    CONF_POINT_OF_DELIVERY,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_ENABLE_SUPPLY_SENSORS,
+    DEFAULT_HISTORY_DAYS,
+    DEFAULT_POINT_OF_DELIVERY,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
 from .coordinator import SsdImsDataCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,9 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_ENABLE_SUPPLY_SENSORS: entry.data.get(
             CONF_ENABLE_SUPPLY_SENSORS, DEFAULT_ENABLE_SUPPLY_SENSORS
         ),
-        CONF_HISTORY_DAYS: entry.data.get(
-            CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS
-        ),
+        CONF_HISTORY_DAYS: entry.data.get(CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS),
     }
 
     coordinator = SsdImsDataCoordinator(hass, api_client, config, entry)
@@ -93,9 +98,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Check if we have old POD ID format (long strings that look like session
         # tokens)
-        if point_of_delivery and any(
-            len(pod) > 50 for pod in point_of_delivery
-        ):
+        if point_of_delivery and any(len(pod) > 50 for pod in point_of_delivery):
             _LOGGER.info("Migrating from session POD IDs to stable POD IDs")
 
             # Create API client to discover PODs
@@ -199,8 +202,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
                     # Check if any configured PODs are not in current list
                     missing_pods = [
-                        pod for pod in point_of_delivery
-                        if pod not in pod_text_to_id
+                        pod for pod in point_of_delivery if pod not in pod_text_to_id
                     ]
                     if missing_pods:
                         _LOGGER.warning(
@@ -271,9 +273,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             _LOGGER.info("POD text to stable ID conversion completed")
 
             except Exception as e:
-                _LOGGER.error(
-                    "Error during POD text to stable ID conversion: %s", e
-                )
+                _LOGGER.error("Error during POD text to stable ID conversion: %s", e)
                 # Don't fail the migration for this, just log the error
             finally:
                 await session.close()
