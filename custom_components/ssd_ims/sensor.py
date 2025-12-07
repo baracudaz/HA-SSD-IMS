@@ -145,7 +145,7 @@ class SsdImsEnergySensor(SsdImsSensor):
 class SsdImsYesterdaySensor(SsdImsEnergySensor):
     """Sensor for yesterday's values."""
 
-    _attr_entity_registry_enabled_default = False
+    _attr_entity_registry_enabled_default = True
 
     def __init__(
         self,

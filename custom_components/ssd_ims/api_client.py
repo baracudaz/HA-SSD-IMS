@@ -102,23 +102,22 @@ class SsdImsApiClient:
                     self._session_token = self._extract_session_token(response)
                     if self._session_token:
                         _LOGGER.debug(
-                            "Session token extracted: %s",
-                            self._session_token[:20] + "...",
+                            f"Session token extracted: {self._session_token[:20]}..."
                         )
                     else:
                         _LOGGER.warning("No session token found in response cookies")
 
-                    _LOGGER.info("Authentication successful for user: %s", username)
+                    _LOGGER.info(f"Authentication successful for user: {username}")
                     return True
                 else:
-                    _LOGGER.error("Authentication failed: %s", response.status)
+                    _LOGGER.error(f"Authentication failed: {response.status}")
                     return False
 
         except ClientError as e:
-            _LOGGER.error("Network error during authentication: %s", e)
+            _LOGGER.error(f"Network error during authentication: {e}")
             return False
         except Exception as e:
-            _LOGGER.error("Unexpected error during authentication: %s", e)
+            _LOGGER.error(f"Unexpected error during authentication: {e}")
             return False
 
     def _extract_session_token(self, response) -> Optional[str]:
@@ -133,7 +132,7 @@ class SsdImsApiClient:
                     return ssd_token_cookie.value
             return None
         except Exception as e:
-            _LOGGER.error("Error extracting session token: %s", e)
+            _LOGGER.error(f"Error extracting session token: {e}")
             return None
 
     def _is_session_expired(self, response) -> bool:
@@ -153,7 +152,7 @@ class SsdImsApiClient:
                 return True
             return False
         except Exception as e:
-            _LOGGER.error("Error checking session expiration: %s", e)
+            _LOGGER.error(f"Error checking session expiration: {e}")
             return False
 
     async def _reauthenticate(self) -> bool:
@@ -181,12 +180,7 @@ class SsdImsApiClient:
 
                 wait_time = 2**attempt  # exponential backoff: 1s, 2s, 4s
                 _LOGGER.warning(
-                    "Network error on attempt %d/%d for %s: %s. Retrying in %ds...",
-                    attempt + 1,
-                    max_retries,
-                    url,
-                    e,
-                    wait_time,
+                    f"Network error on attempt {attempt + 1}/{max_retries} for {url}: {e}. Retrying in {wait_time}s..."
                 )
                 await asyncio.sleep(wait_time)
             except Exception:
@@ -245,10 +239,10 @@ class SsdImsApiClient:
                     raise Exception(f"API error: {response.status}")
 
         except ClientError as e:
-            _LOGGER.error("Network error in authenticated request: %s", e)
+            _LOGGER.error(f"Network error in authenticated request: {e}")
             raise
         except Exception as e:
-            _LOGGER.error("Unexpected error in authenticated request: %s", e)
+            _LOGGER.error(f"Unexpected error in authenticated request: {e}")
             raise
 
     async def get_points_of_delivery(self) -> List[PointOfDelivery]:
@@ -260,19 +254,17 @@ class SsdImsApiClient:
             _LOGGER.debug("Fetching points of delivery from API")
             data = await self._retry_request_with_backoff("GET", API_PODS)
             _LOGGER.debug(
-                "POD API response type: %s, length: %s",
-                type(data),
-                len(data) if isinstance(data, list) else "N/A",
+                f"POD API response type: {type(data).__name__}, length: {len(data) if isinstance(data, list) else 'N/A'}"
             )
             pods = [PointOfDelivery(**pod) for pod in data]
-            _LOGGER.debug("Retrieved %d points of delivery", len(pods))
+            _LOGGER.debug(f"Retrieved {len(pods)} points of delivery")
             return pods
 
         except ClientError as e:
-            _LOGGER.error("Network error getting PODs: %s", e)
+            _LOGGER.error(f"Network error getting PODs: {e}")
             raise
         except Exception as e:
-            _LOGGER.error("Unexpected error getting PODs: %s", e)
+            _LOGGER.error(f"Unexpected error getting PODs: {e}")
             raise
 
     async def get_metering_data(
@@ -343,17 +335,15 @@ class SsdImsApiClient:
                     )
 
             _LOGGER.debug(
-                "Retrieved %d metering data points for POD %s",
-                len(metering_data),
-                pod_id,
+                f"Retrieved {len(metering_data)} metering data points for POD {pod_id}"
             )
             return metering_data
 
         except ClientError as e:
-            _LOGGER.error("Network error getting metering data: %s", e)
+            _LOGGER.error(f"Network error getting metering data: {e}")
             raise
         except Exception as e:
-            _LOGGER.error("Unexpected error getting metering data: %s", e)
+            _LOGGER.error(f"Unexpected error getting metering data: {e}")
             raise
 
     async def get_chart_data(
@@ -404,7 +394,7 @@ class SsdImsApiClient:
 
             # Validate that we have the expected data structure
             if not isinstance(data, dict):
-                _LOGGER.error("Chart data response is not a dictionary: %s", type(data))
+                _LOGGER.error(f"Chart data response is not a dictionary: {type(data).__name__}")
                 raise Exception("Invalid chart data response format")
 
             # Check if we have any data
@@ -459,14 +449,14 @@ class SsdImsApiClient:
                     "idleSupply",
                 ]:
                     sample_info = _log_data_sample(data, field)
-                    _LOGGER.error("  %s: %s", field, sample_info)
+                    _LOGGER.error(f"  {field}: {sample_info}")
                 raise Exception(f"Chart data validation failed: {str(e)}") from e
 
         except ClientError as e:
-            _LOGGER.error("Network error getting chart data: %s", e)
+            _LOGGER.error(f"Network error getting chart data: {e}")
             raise
         except Exception as e:
-            _LOGGER.error("Unexpected error getting chart data: %s", e)
+            _LOGGER.error(f"Unexpected error getting chart data: {e}")
             raise
 
     async def _get_pod_id_by_text(self, pod_text: str) -> Optional[str]:
@@ -478,7 +468,7 @@ class SsdImsApiClient:
                     return pod.value
             return None
         except Exception as e:
-            _LOGGER.error("Error getting POD ID for text %s: %s", pod_text, e)
+            _LOGGER.error(f"Error getting POD ID for text {pod_text}: {e}")
             return None
 
     @property

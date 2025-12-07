@@ -77,7 +77,9 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         )
         if self.update_interval != new_interval:
             self.update_interval = new_interval
-            _LOGGER.info("Update interval changed to %s minutes", new_interval.total_seconds() / 60)
+            _LOGGER.info(
+                f"Update interval changed to {new_interval.total_seconds() / 60} minutes"
+            )
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from API and update statistics."""
@@ -113,7 +115,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                     )
                 except Exception as e:
                     _LOGGER.error(
-                        "Error fetching yesterday data for POD %s: %s", pod_id, e
+                        f"Error fetching yesterday data for POD {pod_id}: {e}"
                     )
                     continue
 
@@ -134,7 +136,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         except ConfigEntryAuthFailed:
             raise
         except Exception as e:
-            _LOGGER.error("Error updating data: %s", e)
+            _LOGGER.error(f"Error updating data: {e}")
             raise UpdateFailed(f"Error updating data: {e}") from e
 
     def _get_random_api_delay(self) -> float:
@@ -150,7 +152,10 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         up to yesterday. Handles both initial import and daily updates.
         """
         # Always enable both consumption and supply sensors
-        enabled_sensor_types = [SENSOR_TYPE_ACTUAL_CONSUMPTION, SENSOR_TYPE_ACTUAL_SUPPLY]
+        enabled_sensor_types = [
+            SENSOR_TYPE_ACTUAL_CONSUMPTION,
+            SENSOR_TYPE_ACTUAL_SUPPLY,
+        ]
 
         for pod_id in pod_ids:
             pod_name_mapping = self.config.get("pod_name_mapping", {})
@@ -263,10 +268,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                             )
                     except Exception as e:
                         _LOGGER.error(
-                            "Failed to fetch or process data for %s on %s: %s",
-                            statistic_id,
-                            day_start.date(),
-                            e,
+                            f"Failed to fetch or process data for {statistic_id} on {day_start.date()}: {e}"
                         )
 
                     current_date += timedelta(days=1)
@@ -288,7 +290,10 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Fetch cumulative totals from external statistics."""
         # Always enable both consumption and supply sensors
-        enabled_sensor_types = [SENSOR_TYPE_ACTUAL_CONSUMPTION, SENSOR_TYPE_ACTUAL_SUPPLY]
+        enabled_sensor_types = [
+            SENSOR_TYPE_ACTUAL_CONSUMPTION,
+            SENSOR_TYPE_ACTUAL_SUPPLY,
+        ]
 
         for pod_id, pod_data in pod_data_dict.items():
             pod_name_mapping = self.config.get("pod_name_mapping", {})
@@ -347,7 +352,10 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         """Aggregate data for other (non-energy) sensors."""
         aggregated = {}
         # Always enable both consumption and supply sensors
-        enabled_sensor_types = [SENSOR_TYPE_ACTUAL_CONSUMPTION, SENSOR_TYPE_ACTUAL_SUPPLY]
+        enabled_sensor_types = [
+            SENSOR_TYPE_ACTUAL_CONSUMPTION,
+            SENSOR_TYPE_ACTUAL_SUPPLY,
+        ]
 
         for period_key, chart_data in chart_data_by_period.items():
             aggregated[period_key] = {}

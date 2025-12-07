@@ -14,4 +14,8 @@ cytho
 .idea/
 .DS_Store
 .claude/
-
+pyproject.toml
+uv.lock
+scritps/
+config/
+.python-version

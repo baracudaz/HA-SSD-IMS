@@ -123,8 +123,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             continue
 
                     _LOGGER.debug(
-                        "Available PODs for migration: %s",
-                        list(pod_mapping.values()),
+                        f"Available PODs for migration: {list(pod_mapping.values())}"
                     )
 
                     # Migrate session POD IDs to stable POD IDs
@@ -134,14 +133,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             stable_pod_id = pod_mapping[session_pod_id]
                             new_point_of_delivery.append(stable_pod_id)
                             _LOGGER.info(
-                                "Migrated session POD ID %s to stable ID %s",
-                                session_pod_id,
-                                stable_pod_id,
+                                f"Migrated session POD ID {session_pod_id} to stable ID {stable_pod_id}"
                             )
                         else:
                             _LOGGER.warning(
-                                "Session POD ID %s not found in current PODs, removing",
-                                session_pod_id,
+                                f"Session POD ID {session_pod_id} not found in current PODs, removing"
                             )
 
                     # Update configuration
@@ -155,7 +151,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     return False
 
             except Exception as e:
-                _LOGGER.error("Error during configuration migration: %s", e)
+                _LOGGER.error(f"Error during configuration migration: {e}")
                 return False
             finally:
                 await session.close()
@@ -184,16 +180,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             pod_text_to_id[pod.text] = stable_id
                         except ValueError as e:
                             _LOGGER.warning(
-                                "Skipping POD with invalid ID format: %s - %s",
-                                pod.text,
-                                e,
+                                f"Skipping POD with invalid ID format: {pod.text} - {e}"
                             )
                             continue
 
                     _LOGGER.debug(
-                        "Available POD stable IDs: %s", list(pod_text_to_id.values())
+                        f"Available POD stable IDs: {list(pod_text_to_id.values())}"
                     )
-                    _LOGGER.debug("Configured POD texts: %s", point_of_delivery)
+                    _LOGGER.debug(f"Configured POD texts: {point_of_delivery}")
 
                     # Check if any configured PODs are not in current list
                     missing_pods = [
@@ -201,9 +195,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     ]
                     if missing_pods:
                         _LOGGER.warning(
-                            "Some configured POD texts not found in current API response: "
-                            "%s",
-                            missing_pods,
+                            f"Some configured POD texts not found in current API response: {missing_pods}"
                         )
 
                         # Try to find similar PODs by extracting the POD number
@@ -213,9 +205,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                                 stable_id = pod_text_to_id[pod_text]
                                 updated_point_of_delivery.append(stable_id)
                                 _LOGGER.info(
-                                    "Converted POD text %s to stable ID %s",
-                                    pod_text,
-                                    stable_id,
+                                    f"Converted POD text {pod_text} to stable ID {stable_id}"
                                 )
                             else:
                                 # Try to find a match by POD number
@@ -230,19 +220,16 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                                         if current_pod_text.startswith(pod_number):
                                             updated_point_of_delivery.append(stable_id)
                                             _LOGGER.info(
-                                                "Updated POD from %s to stable ID %s",
-                                                pod_text,
-                                                stable_id,
+                                                f"Updated POD from {pod_text} to stable ID {stable_id}"
                                             )
                                             break
                                     else:
                                         _LOGGER.warning(
-                                            "No matching POD found for %s", pod_text
+                                            f"No matching POD found for {pod_text}"
                                         )
                                 else:
                                     _LOGGER.warning(
-                                        "Could not extract POD number from %s",
-                                        pod_text,
+                                        f"Could not extract POD number from {pod_text}"
                                     )
                         else:
                             # Convert all POD texts to stable IDs
@@ -252,13 +239,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                                     stable_id = pod_text_to_id[pod_text]
                                     updated_point_of_delivery.append(stable_id)
                                     _LOGGER.info(
-                                        "Converted POD text %s to stable ID %s",
-                                        pod_text,
-                                        stable_id,
+                                        f"Converted POD text {pod_text} to stable ID {stable_id}"
                                     )
                                 else:
                                     _LOGGER.warning(
-                                        "POD text %s not found, removing", pod_text
+                                        f"POD text {pod_text} not found, removing"
                                     )
 
                         # Update configuration if changes were made
@@ -268,7 +253,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             _LOGGER.info("POD text to stable ID conversion completed")
 
             except Exception as e:
-                _LOGGER.error("Error during POD text to stable ID conversion: %s", e)
+                _LOGGER.error(f"Error during POD text to stable ID conversion: {e}")
                 # Don't fail the migration for this, just log the error
             finally:
                 await session.close()

@@ -70,7 +70,7 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     else:
                         errors["base"] = "invalid_auth"
             except Exception as e:
-                _LOGGER.error("Error during authentication: %s", e)
+                _LOGGER.error(f"Error during authentication: {e}")
                 errors["base"] = "cannot_connect"
 
         # Show form
@@ -107,7 +107,7 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 pod_options[pod_id] = pod.text
             except ValueError as e:
                 _LOGGER.warning(
-                    "Skipping POD with invalid ID format: %s - %s", pod.text, e
+                    f"Skipping POD with invalid ID format: {pod.text} - {e}"
                 )
                 continue
 

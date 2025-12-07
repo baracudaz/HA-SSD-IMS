@@ -142,7 +142,9 @@ class TestSsdImsApiClient:
     class TestChartData:
         """Test chart data retrieval."""
 
-        async def test_successful_chart_retrieval(self, api_client, mock_chart_response):
+        async def test_successful_chart_retrieval(
+            self, api_client, mock_chart_response
+        ):
             """Test successful chart data retrieval."""
             api_client._authenticated = True
             pod_id = "99XXX1234560000G"
@@ -170,7 +172,10 @@ class TestSsdImsApiClient:
             to_date = datetime(2025, 1, 20, 23, 59)
 
             response_with_nones = {
-                "meteringDatetime": ["2025-01-20T10:15:00.0000000Z", "2025-01-20T10:30:00.0000000Z"],
+                "meteringDatetime": [
+                    "2025-01-20T10:15:00.0000000Z",
+                    "2025-01-20T10:30:00.0000000Z",
+                ],
                 "actualConsumption": [0.1320, None],
                 "actualSupply": [None, 0.5],
                 "idleConsumption": [0.0, 0.0],
@@ -251,7 +256,9 @@ class TestSsdImsApiClient:
             result = api_client._is_session_expired(mock_response)
             assert result is False
 
-        async def test_reauthentication_with_stored_credentials(self, api_client, mock_auth_response):
+        async def test_reauthentication_with_stored_credentials(
+            self, api_client, mock_auth_response
+        ):
             """Test re-authentication with stored credentials."""
             api_client._username = "test_user"
             api_client._password = "test_pass"
