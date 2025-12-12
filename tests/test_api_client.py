@@ -322,3 +322,37 @@ class TestPodIdExtraction:
             assert len(pods) == 2
             assert pods[0].id == "99XXX1234560000G"
             assert pods[1].id == "99YYY9876540000G"
+
+
+class TestSsdImsSensor:
+    """Test suite for SSD IMS sensor entities."""
+
+    def test_ssd_ims_sensors_enabled_by_default_for_all_periods_and_types(self):
+        """Ensure SSD IMS sensors are enabled by default for all periods and sensor types."""
+        from custom_components.ssd_ims.sensor import SsdImsYesterdaySensor
+
+        # Create a mock coordinator with minimal structure for all periods
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {
+            "pod_id_123": {
+                "aggregated_data": {
+                    "yesterday": {"actual_consumption": 10.5, "actual_supply": 2.3}
+                }
+            }
+        }
+
+        pod_id = "pod_id_123"
+        periods = ("yesterday",)
+        sensor_types = ("actual_consumption", "actual_supply")
+
+        for period in periods:
+            for sensor_type in sensor_types:
+                sensor = SsdImsYesterdaySensor(
+                    coordinator=mock_coordinator,
+                    sensor_type=sensor_type,
+                    period=period,
+                    pod_id=pod_id,
+                    friendly_name="Home",
+                )
+
+                assert sensor.entity_registry_enabled_default is True

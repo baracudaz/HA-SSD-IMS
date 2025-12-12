@@ -40,6 +40,12 @@ from .models import ChartData, PointOfDelivery
 
 _LOGGER = logging.getLogger(__name__)
 
+# Sensor types that are always enabled for statistics import
+ENABLED_SENSOR_TYPES: tuple[str, ...] = (
+    SENSOR_TYPE_ACTUAL_CONSUMPTION,
+    SENSOR_TYPE_ACTUAL_SUPPLY,
+)
+
 
 def _sanitize_name(name: str) -> str:
     """Sanitize name for use in entity IDs."""
@@ -151,11 +157,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         Checks the last imported statistic and fetches all missing daily data
         up to yesterday. Handles both initial import and daily updates.
         """
-        # Always enable both consumption and supply sensors
-        enabled_sensor_types = [
-            SENSOR_TYPE_ACTUAL_CONSUMPTION,
-            SENSOR_TYPE_ACTUAL_SUPPLY,
-        ]
+        enabled_sensor_types = ENABLED_SENSOR_TYPES
 
         for pod_id in pod_ids:
             pod_name_mapping = self.config.get("pod_name_mapping", {})
@@ -289,11 +291,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         self, pod_data_dict: Dict[str, Any]
     ) -> None:
         """Fetch cumulative totals from external statistics."""
-        # Always enable both consumption and supply sensors
-        enabled_sensor_types = [
-            SENSOR_TYPE_ACTUAL_CONSUMPTION,
-            SENSOR_TYPE_ACTUAL_SUPPLY,
-        ]
+        enabled_sensor_types = ENABLED_SENSOR_TYPES
 
         for pod_id, pod_data in pod_data_dict.items():
             pod_name_mapping = self.config.get("pod_name_mapping", {})
@@ -351,11 +349,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
     ) -> Dict[str, Dict[str, float]]:
         """Aggregate data for other (non-energy) sensors."""
         aggregated = {}
-        # Always enable both consumption and supply sensors
-        enabled_sensor_types = [
-            SENSOR_TYPE_ACTUAL_CONSUMPTION,
-            SENSOR_TYPE_ACTUAL_SUPPLY,
-        ]
+        enabled_sensor_types = ENABLED_SENSOR_TYPES
 
         for period_key, chart_data in chart_data_by_period.items():
             aggregated[period_key] = {}

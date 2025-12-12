@@ -102,22 +102,23 @@ class SsdImsApiClient:
                     self._session_token = self._extract_session_token(response)
                     if self._session_token:
                         _LOGGER.debug(
-                            f"Session token extracted: {self._session_token[:20]}..."
+                            "Session token extracted (length=%d)",
+                            len(self._session_token),
                         )
                     else:
                         _LOGGER.warning("No session token found in response cookies")
 
-                    _LOGGER.info(f"Authentication successful for user: {username}")
+                    _LOGGER.info("Authentication successful for user: %s", username)
                     return True
                 else:
-                    _LOGGER.error(f"Authentication failed: {response.status}")
+                    _LOGGER.error("Authentication failed: %s", response.status)
                     return False
 
         except ClientError as e:
-            _LOGGER.error(f"Network error during authentication: {e}")
+            _LOGGER.error("Network error during authentication: %s", e)
             return False
         except Exception as e:
-            _LOGGER.error(f"Unexpected error during authentication: {e}")
+            _LOGGER.error("Unexpected error during authentication: %s", e)
             return False
 
     def _extract_session_token(self, response) -> Optional[str]:
@@ -394,7 +395,9 @@ class SsdImsApiClient:
 
             # Validate that we have the expected data structure
             if not isinstance(data, dict):
-                _LOGGER.error(f"Chart data response is not a dictionary: {type(data).__name__}")
+                _LOGGER.error(
+                    f"Chart data response is not a dictionary: {type(data).__name__}"
+                )
                 raise Exception("Invalid chart data response format")
 
             # Check if we have any data
