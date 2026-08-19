@@ -21,3 +21,5 @@ config/
 .python-version
 dist/
 .ruff_cache/
+
+custom_components/hacs/
