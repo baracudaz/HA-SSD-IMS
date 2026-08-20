@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 2.2.1
+
+- **Bug fix**: Submitting the POD selection step with nothing selected raised a generic, untranslated schema-validation error instead of the intended "Please select at least one Point of Delivery" message — the schema's own `vol.Length(min=1)` rejected the empty selection before the step's own (correct) error handling ever ran. Removed the redundant schema-level check so the friendly error is actually shown
+- **Internal**: Added `pytest-homeassistant-custom-component`, giving the config/options flow real test coverage (previously 0%) by running it through Home Assistant's own flow-manager machinery instead of hand-mocking it. This required bumping the pinned dev/test versions of `homeassistant` (2026.2.1 → 2026.2.3), `pydantic` (2.12.5 → 2.12.2), and `pytest` (9.0.2 → 9.0.0) to match what the test harness resolves to — these are dev/test-only pins in `requirements.txt`/`pyproject.toml`, not runtime requirements in `manifest.json`, so this doesn't change what ships to users
+
 ## Version 2.2.0
 
 - **Internal**: `PointOfDelivery.id` no longer parses/validates the stable POD ID lazily on every property access (where a bad value could raise unpredictably wherever `.id` happened to be read). It's now extracted once at construction time; a POD with unparseable text now fails to construct at all. `SsdImsApiClient.get_points_of_delivery()` is the single point that handles this failure, skipping the offending POD — every `PointOfDelivery` instance that exists anywhere else in the codebase is now guaranteed to have a valid `.id`, which let several defensive per-access `try/except` blocks in `config_flow.py`, `coordinator.py`, and `__init__.py`'s migration code be simplified away

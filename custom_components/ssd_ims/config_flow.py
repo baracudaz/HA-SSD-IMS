@@ -195,9 +195,12 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="point_of_delivery",
             data_schema=vol.Schema(
                 {
-                    pods_field: vol.All(
-                        cv.multi_select(pod_options), vol.Length(min=1)
-                    ),
+                    # No vol.Length(min=1) here: an empty selection needs to
+                    # reach the handler above so it can show the friendlier
+                    # "no_pods_selected" error, rather than voluptuous
+                    # rejecting it first with a generic schema-validation
+                    # error the user never sees a translated message for.
+                    pods_field: cv.multi_select(pod_options),
                 }
             ),
             errors=errors,
