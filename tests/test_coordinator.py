@@ -24,6 +24,7 @@ def _make_coordinator(api_client, config):
     coordinator.pods = {}
     coordinator._last_successful_data_date = None
     coordinator._stats_lock = asyncio.Lock()
+    coordinator._migration_collision_warned = set()
     coordinator.data = None
     return coordinator
 
@@ -150,6 +151,48 @@ class TestStatisticIdKeying:
         mock_rename.assert_called_once_with(
             coordinator.hass, legacy_id, new_statistic_id=new_id
         )
+
+    async def test_migrate_statistic_ids_skips_collision_and_warns_once(self, caplog):
+        """If both the legacy id and the new id already have their own
+        data (e.g. from an in-place upgrade that independently backfilled
+        the new id before a migration could run), renaming would either be
+        refused by the recorder or silently discard one series. Skip it,
+        warn once, and don't re-warn on a later call for the same id."""
+        pod_id = "pod_1"
+        legacy_id = "ssd_ims:home_actual_consumption"
+
+        coordinator = _make_coordinator(
+            MagicMock(), {CONF_POD_NAME_MAPPING: {pod_id: "Home"}}
+        )
+
+        with (
+            patch(
+                "custom_components.ssd_ims.coordinator.get_instance"
+            ) as mock_get_instance,
+            patch(
+                "custom_components.ssd_ims.coordinator.get_metadata"
+            ) as mock_get_metadata,
+            patch(
+                "custom_components.ssd_ims.coordinator.async_update_statistics_metadata"
+            ) as mock_rename,
+        ):
+            mock_instance = MagicMock()
+            mock_instance.async_add_executor_job = AsyncMock(side_effect=_run_executor)
+            mock_get_instance.return_value = mock_instance
+            # Both the legacy id and the new id already have metadata.
+            mock_get_metadata.return_value = {
+                legacy_id: (1, MagicMock()),
+                "ssd_ims:pod_1_actual_consumption": (2, MagicMock()),
+                "ssd_ims:pod_1_actual_supply": (3, MagicMock()),
+            }
+
+            with caplog.at_level("WARNING"):
+                await coordinator._migrate_statistic_ids([pod_id])
+                await coordinator._migrate_statistic_ids([pod_id])
+
+        mock_rename.assert_not_called()
+        collision_warnings = [r for r in caplog.records if "not renaming" in r.message]
+        assert len(collision_warnings) == 1
 
     async def test_migrate_statistic_ids_skips_when_no_legacy_metadata_exists(self):
         """A fresh install (or one already migrated) has nothing to rename."""

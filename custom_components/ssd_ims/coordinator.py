@@ -67,6 +67,9 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         self.pods: dict[str, PointOfDelivery] = {}
         self._last_successful_data_date: date | None = None
         self._stats_lock = asyncio.Lock()
+        # Legacy statistic_ids we've already warned about being blocked by a
+        # same-named collision — avoids re-logging every poll forever.
+        self._migration_collision_warned: set[str] = set()
 
         scan_interval = timedelta(
             minutes=config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -238,17 +241,38 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         if not legacy_ids:
             return
 
+        # Check both sides at once: whether the legacy id has anything to
+        # migrate, and whether the new id is already (independently)
+        # occupied — renaming onto an existing statistic_id is refused by
+        # the recorder, so attempting it when occupied would just fail
+        # (loudly, every poll) instead of no-op'ing quietly.
+        # statistic_ids and statistic_source can't be combined (the recorder
+        # treats that as mutually exclusive) — harmless to drop the source
+        # filter since we already scope to exactly the IDs we're checking.
+        all_ids = set(legacy_ids) | set(legacy_ids.values())
         existing_metadata = await get_instance(self.hass).async_add_executor_job(
-            partial(
-                get_metadata,
-                self.hass,
-                statistic_ids=set(legacy_ids),
-                statistic_source=DOMAIN,
-            )
+            partial(get_metadata, self.hass, statistic_ids=all_ids)
         )
         for legacy_id, new_id in legacy_ids.items():
             if legacy_id not in existing_metadata:
                 continue
+
+            if new_id in existing_metadata:
+                if legacy_id not in self._migration_collision_warned:
+                    self._migration_collision_warned.add(legacy_id)
+                    _LOGGER.warning(
+                        "Statistics exist under both the legacy id %s and the "
+                        "new id %s — not renaming, since that would either be "
+                        "refused or silently discard one series. This id pair "
+                        "won't be retried again this session; if the two "
+                        "series need reconciling, do so manually (e.g. via "
+                        "Developer Tools > Statistics) and reload the "
+                        "integration",
+                        legacy_id,
+                        new_id,
+                    )
+                continue
+
             _LOGGER.info(
                 "Migrating statistics from legacy id %s to %s", legacy_id, new_id
             )

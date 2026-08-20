@@ -90,6 +90,28 @@ class TestSsdImsApiClient:
                 assert result is False
                 assert api_client._authenticated is False
 
+        async def test_server_error_during_login_raises_typed_server_error(
+            self, api_client
+        ):
+            """A 5xx during login (e.g. the portal's own maintenance window)
+            must raise the typed SsdImsServerError — the same classification
+            used for authenticated requests — so it's clearly distinguished
+            from a generic/unexpected response and still lets __init__.py's
+            existing RuntimeError handling raise ConfigEntryNotReady."""
+            from custom_components.ssd_ims.api_client import SsdImsServerError
+
+            with patch.object(api_client._session, "post") as mock_post:
+                mock_response = AsyncMock()
+                mock_response.status = 503
+                mock_response.headers = {"content-type": "application/json"}
+                mock_response.cookies = {}
+                mock_post.return_value.__aenter__.return_value = mock_response
+
+                with pytest.raises(SsdImsServerError, match="503"):
+                    await api_client.authenticate("test_user", "test_pass")
+
+                assert api_client._authenticated is False
+
         async def test_network_error_during_auth_propagates(self, api_client):
             """Network errors during authentication must propagate rather than
             being reported as invalid credentials — callers (e.g. __init__.py)
@@ -456,13 +478,14 @@ class TestSsdImsSensor:
                 == mock_coordinator.data[pod_id]["aggregated_data"][sensor_type]
             )
 
-    def test_yesterday_sensor_is_not_total_increasing(self):
+    def test_yesterday_sensor_has_no_state_class(self):
         """The yesterday sensor is a daily snapshot that can legitimately
-        decrease day-to-day, not a running total — TOTAL_INCREASING would
-        make HA auto-generate a second, redundant long-term statistics
-        series alongside the one the coordinator writes explicitly."""
-        from homeassistant.components.sensor import SensorStateClass
-
+        decrease day-to-day, not a running total. TOTAL_INCREASING/TOTAL
+        would make HA auto-generate a second, redundant long-term
+        statistics series alongside the one the coordinator writes
+        explicitly, and MEASUREMENT isn't a legal alternative for the
+        ENERGY device class (HA logs an "impossible" warning and rejects
+        it) — so state_class must be left unset entirely."""
         from custom_components.ssd_ims.sensor import SsdImsYesterdaySensor
 
         sensor = SsdImsYesterdaySensor(
@@ -472,7 +495,7 @@ class TestSsdImsSensor:
             friendly_name="Home",
         )
 
-        assert sensor.state_class == SensorStateClass.MEASUREMENT
+        assert sensor.state_class is None
 
     def test_cumulative_sensor_is_total_increasing(self):
         """The cumulative sensor mirrors an ever-increasing running total

@@ -111,7 +111,13 @@ class SsdImsApiClient:
                 return False
 
             if response.status != 200:
-                raise RuntimeError(f"Unexpected login response: {response.status}")
+                # 401/403 are already handled above; anything else reuses the
+                # same typed classification as authenticated requests (in
+                # particular, 5xx becomes SsdImsServerError instead of a
+                # generic "unexpected" RuntimeError — a 503 during the
+                # portal's own maintenance windows is a known, expected
+                # condition, not something surprising).
+                self._raise_for_status(response.status, " during login")
 
             data = await response.json()
             AuthResponse(**data)  # Validate response structure

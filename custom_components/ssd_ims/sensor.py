@@ -136,11 +136,15 @@ class SsdImsYesterdaySensor(SsdImsEnergySensor):
         super().__init__(coordinator, sensor_type, pod_id, friendly_name)
         # This is a self-contained daily snapshot, replaced once a day, and
         # can legitimately be lower than the previous day's value — not a
-        # running total. TOTAL_INCREASING would make HA generate its own
-        # long-term "sum" statistics for this entity, duplicating (and
+        # running total. TOTAL_INCREASING/TOTAL would make HA generate its
+        # own long-term statistics for this entity, duplicating (and
         # potentially conflicting with) the external statistics the
-        # coordinator writes directly for the Energy dashboard.
-        self._attr_state_class = SensorStateClass.MEASUREMENT
+        # coordinator writes directly for the Energy dashboard. MEASUREMENT
+        # isn't a legal alternative either: HA's ENERGY device class only
+        # accepts state_class None, TOTAL, or TOTAL_INCREASING (using
+        # MEASUREMENT logs an "impossible" warning and is expected to raise
+        # in a future HA version) — so leave state_class unset (None), which
+        # also means no HA-generated statistics at all for this entity.
 
         sensor_name = self._generate_sensor_name("Yesterday")
         sanitized_sensor_name = sanitize_name(sensor_name)
