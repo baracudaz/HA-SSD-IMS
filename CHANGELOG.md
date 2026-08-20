@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 2.2.5
+
+- **Bug fix**: The `Actual Consumption/Supply Total` sensors could get stuck at `0.0` (or a stale value) indefinitely after the first-ever setup. The background task that runs the initial statistics backfill (deferred out of the config-entry setup path so a large catch-up range can't block Home Assistant's bootstrap timeout) set the smart-polling gate (`_last_successful_data_date`) *before* calling `async_request_refresh()` to pick up the newly imported totals. Since that refresh re-enters `_async_update_data`, which returns the previous, unchanged `coordinator.data` early whenever the gate is already set for today, the premature set made the refresh short-circuit — returning the stale pre-backfill totals (computed when no statistics existed yet) instead of recomputing them from the now-populated statistics. The gate is now only set by `_async_update_data` itself, after it has actually recomputed the totals, matching how every other poll already behaves
+
 ## Version 2.2.4
 
 - **Internal**: Reverted the pod_id-keyed statistic ID scheme (introduced in 2.1.7, with collision-handling added in 2.2.3) back to the original friendly-name-based one from before 2.1.7. The migration path it depended on — renaming a legacy, friendly-name-based statistic onto the new pod_id-based id, preserving history — turned out to be fundamentally broken: Home Assistant core's `recorder.statistics.async_update_statistics_metadata` filters its rename query by the recorder's own hardcoded internal domain (`"recorder"`), so it silently matches zero rows for external, non-recorder-source statistics like ours (`source="ssd_ims"`) — no error is raised, the rename just quietly does nothing. Every "successful" migration observed during manual testing was actually this no-op, immediately followed by the coordinator creating a brand new, empty-starting duplicate series under the intended id.

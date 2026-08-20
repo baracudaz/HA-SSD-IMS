@@ -103,6 +103,35 @@ class TestStatisticsBackfillFailureHandling:
         assert mock_add_stats.call_count == 2
 
 
+class TestBackgroundBackfillGateOrdering:
+    """Regression test for the first-refresh background backfill task.
+
+    The background task used to set the smart-polling gate
+    (_last_successful_data_date) *before* calling async_request_refresh().
+    Since that refresh re-enters _async_update_data, which returns early
+    (without recomputing cumulative totals) whenever the gate is already
+    set for today, the premature set made the refresh short-circuit and
+    return the stale, pre-backfill data — leaving the Total sensors stuck
+    at 0 until the gate reset the next calendar day, even though the
+    backfill had just successfully populated statistics.
+    """
+
+    async def test_gate_is_not_set_before_requesting_refresh(self):
+        coordinator = _make_coordinator(MagicMock(), {})
+        gate_at_refresh_time = "unset"
+
+        async def fake_request_refresh():
+            nonlocal gate_at_refresh_time
+            gate_at_refresh_time = coordinator._last_successful_data_date
+
+        coordinator._update_statistics = AsyncMock(return_value=True)
+        coordinator.async_request_refresh = AsyncMock(side_effect=fake_request_refresh)
+
+        await coordinator._async_backfill_statistics(["pod_1"])
+
+        assert gate_at_refresh_time is None
+
+
 class TestStatisticIdKeying:
     """statistic_id is derived from the user-editable friendly POD name
     (falling back to pod_id when no friendly name is set). This is a

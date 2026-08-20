@@ -184,16 +184,17 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         catch-up range can't block Home Assistant's bootstrap timeout.
         """
         try:
-            stats_complete = await self._update_statistics(pod_ids)
+            await self._update_statistics(pod_ids)
         except Exception:
             _LOGGER.exception("Error during background statistics backfill")
             return
 
-        if stats_complete:
-            self._last_successful_data_date = dt_util.now().date()
-
         # Pull the newly imported totals into coordinator.data and notify
-        # entities instead of waiting for the next scheduled poll.
+        # entities instead of waiting for the next scheduled poll. This
+        # re-runs _async_update_data, which sets the smart-polling gate
+        # itself once it confirms completeness — setting it here first
+        # would make that refresh short-circuit on the gate and return the
+        # stale pre-backfill data instead of picking up the new totals.
         await self.async_request_refresh()
 
     def _get_random_api_delay(self) -> float:
