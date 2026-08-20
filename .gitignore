@@ -14,11 +14,8 @@ cytho
 .idea/
 .DS_Store
 .claude/
-pyproject.toml
-uv.lock
 scritps/
 config/
-.python-version
 dist/
 .ruff_cache/
 

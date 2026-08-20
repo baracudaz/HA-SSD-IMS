@@ -136,7 +136,12 @@ class ChartData(BaseModel):
         result = []
         for i, item in enumerate(v):
             if item is None:
-                # Skip None values - they're valid for supply data when no generation occurs
+                # None is valid for supply data when no generation occurs, but
+                # the position must be preserved: coordinator.py indexes this
+                # list positionally against metering_datetime, so dropping the
+                # entry instead of zero-filling it would misalign every value
+                # that follows.
+                result.append(0.0)
                 continue
             try:
                 result.append(float(item))

@@ -217,10 +217,19 @@ class TestSsdImsApiClient:
 
                 chart_data = await api_client.get_chart_data(pod_id, from_date, to_date)
 
-                assert len(chart_data.actual_consumption) == 1
+                # None entries must be zero-filled, not dropped: the list
+                # length has to stay aligned with metering_datetime since
+                # coordinator.py indexes these lists positionally.
+                assert len(chart_data.actual_consumption) == len(
+                    chart_data.metering_datetime
+                )
                 assert chart_data.actual_consumption[0] == 0.1320
-                assert len(chart_data.actual_supply) == 1
-                assert chart_data.actual_supply[0] == 0.5
+                assert chart_data.actual_consumption[1] == 0.0
+                assert len(chart_data.actual_supply) == len(
+                    chart_data.metering_datetime
+                )
+                assert chart_data.actual_supply[0] == 0.0
+                assert chart_data.actual_supply[1] == 0.5
 
     class TestErrorHandling:
         """Test error handling scenarios."""

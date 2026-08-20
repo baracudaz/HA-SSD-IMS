@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 2.1.7
+
+- **Bug fix**: A single day that failed to fetch or process partway through the statistics backfill range was previously skipped over silently, and if the final day still succeeded the whole range was marked complete — permanently understating the cumulative energy total from that point on, since the next poll resumes from the last successfully persisted day. A failed day now stops the backfill walk for that POD/sensor and is retried on the next poll instead of being silently dropped
+- **Bug fix**: `None` entries in the portal's `actualConsumption`/`actualSupply` chart data were dropped instead of zero-filled, which could shift every value after the gap out of alignment with its timestamp. They're now preserved as `0.0` so list positions stay aligned
+- **Bug fix**: External statistic IDs are now derived from the stable POD ID instead of the user-editable friendly name. Previously, renaming a POD (via initial setup or the reconfigure flow) changed its statistic ID and silently orphaned all previously-imported history, resetting the Energy dashboard total for that POD to zero. Existing installs are migrated automatically: statistics found under the old, name-derived ID are renamed in place to the new pod_id-derived ID, preserving history
+- **Internal**: `pyproject.toml` is now tracked in the repository instead of being gitignored, so a fresh clone gets the same `ruff`/`pytest` configuration as the working tree CI already relies on
+- **Internal**: CI now runs the `pytest` test suite on every push/PR, alongside the existing `ruff` lint/format checks
+
 ## Version 2.1.6
 
 - **Bug fix**: The initial statistics backfill (e.g. large `history_days` catch-up on first setup) no longer blocks Home Assistant's startup and can trip its bootstrap timeout; it now runs as a background task while setup completes immediately, with entities updating once the backfill finishes

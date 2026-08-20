@@ -4,12 +4,15 @@ import asyncio
 import logging
 import random
 from datetime import date, datetime, timedelta
+from functools import partial
 from typing import Any
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
+    async_update_statistics_metadata,
     get_last_statistics,
+    get_metadata,
     StatisticMeanType,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -26,6 +29,7 @@ from .const import (
     API_DELAY_MAX,
     API_DELAY_MIN,
     CONF_HISTORY_DAYS,
+    CONF_POD_NAME_MAPPING,
     CONF_POINT_OF_DELIVERY,
     CONF_SCAN_INTERVAL,
     DEFAULT_HISTORY_DAYS,
@@ -207,12 +211,66 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         delay = random.uniform(API_DELAY_MIN, API_DELAY_MAX)
         return max(0.3, delay)
 
+    @staticmethod
+    def _build_statistic_id(pod_id: str, sensor_type: str) -> str:
+        """Build the external statistic id for a POD/sensor type.
+
+        Keyed off the stable pod_id (never the user-editable friendly name)
+        so renaming a POD in the config flow can't orphan its history.
+        """
+        return f"{DOMAIN}:{sanitize_name(pod_id)}_{sensor_type}".lower()
+
+    @staticmethod
+    def _build_legacy_statistic_id(pod_name: str, sensor_type: str) -> str:
+        """Build the pre-migration, friendly-name-derived statistic id.
+
+        Only used to locate and migrate statistics imported by integration
+        versions prior to the pod_id-keyed statistic_id scheme.
+        """
+        return f"{DOMAIN}:{sanitize_name(pod_name)}_{sensor_type}".lower()
+
+    async def _migrate_statistic_ids(self, pod_ids: list[str]) -> None:
+        """Rename any statistics still stored under the legacy, friendly-name-
+        derived statistic_id to the stable pod_id-derived one, preserving history.
+        """
+        pod_name_mapping = self.config.get(CONF_POD_NAME_MAPPING, {})
+        legacy_ids: dict[str, str] = {}
+        for pod_id in pod_ids:
+            pod_name = pod_name_mapping.get(pod_id, pod_id)
+            for sensor_type in ENABLED_SENSOR_TYPES:
+                new_id = self._build_statistic_id(pod_id, sensor_type)
+                legacy_id = self._build_legacy_statistic_id(pod_name, sensor_type)
+                if legacy_id != new_id:
+                    legacy_ids[legacy_id] = new_id
+
+        if not legacy_ids:
+            return
+
+        existing_metadata = await get_instance(self.hass).async_add_executor_job(
+            partial(
+                get_metadata,
+                self.hass,
+                statistic_ids=set(legacy_ids),
+                statistic_source=DOMAIN,
+            )
+        )
+        for legacy_id, new_id in legacy_ids.items():
+            if legacy_id not in existing_metadata:
+                continue
+            _LOGGER.info(
+                "Migrating statistics from legacy id %s to %s", legacy_id, new_id
+            )
+            async_update_statistics_metadata(
+                self.hass, legacy_id, new_statistic_id=new_id
+            )
+
     async def _update_statistics(self, pod_ids: list[str]) -> bool:
         """Import statistics for all configured PODs, serialized against
         concurrent callers (the background backfill task and a regular
         scheduled poll can otherwise overlap on the same statistics).
         """
         async with self._stats_lock:
+            await self._migrate_statistic_ids(pod_ids)
             return await self._update_statistics_locked(pod_ids)
 
     async def _update_statistics_locked(self, pod_ids: list[str]) -> bool:
@@ -225,13 +283,11 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         """
         all_up_to_date = True
         for pod_id in pod_ids:
-            pod_name_mapping = self.config.get("pod_name_mapping", {})
+            pod_name_mapping = self.config.get(CONF_POD_NAME_MAPPING, {})
             pod_name = pod_name_mapping.get(pod_id, pod_id)
 
             for sensor_type in ENABLED_SENSOR_TYPES:
-                sanitized_friendly_name = sanitize_name(pod_name)
-                statistic_name = f"{sanitized_friendly_name}_{sensor_type}".lower()
-                statistic_id = f"{DOMAIN}:{statistic_name}"
+                statistic_id = self._build_statistic_id(pod_id, sensor_type)
 
                 last_stats_result = await get_instance(
                     self.hass
@@ -361,6 +417,15 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                             day_start.date(),
                             e,
                         )
+                        # Stop walking forward for this POD/sensor type instead
+                        # of skipping the failed day: later days would otherwise
+                        # get flushed on top of a cumulative_sum missing this
+                        # day's contribution, and since the next poll resumes
+                        # from the last *persisted* statistic, the gap would
+                        # never be retried and would permanently understate
+                        # the running total.
+                        all_up_to_date = False
+                        break
 
                     current_date += timedelta(days=1)
 
@@ -380,16 +445,11 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Fetch cumulative totals from external statistics."""
         for pod_id, pod_data in pod_data_dict.items():
-            pod_name_mapping = self.config.get("pod_name_mapping", {})
-            pod_name = pod_name_mapping.get(pod_id, pod_id)
-
             if "cumulative_totals" not in pod_data:
                 pod_data["cumulative_totals"] = {}
 
             for sensor_type in ENABLED_SENSOR_TYPES:
-                sanitized_friendly_name = sanitize_name(pod_name)
-                statistic_name = f"{sanitized_friendly_name}_{sensor_type}".lower()
-                statistic_id = f"{DOMAIN}:{statistic_name}"
+                statistic_id = self._build_statistic_id(pod_id, sensor_type)
 
                 last_stats = await get_instance(self.hass).async_add_executor_job(
                     get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}

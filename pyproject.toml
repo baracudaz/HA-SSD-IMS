@@ -1,0 +1,19 @@
+[project]
+name = "ssd-ims"
+version = "0.0.1"
+description = "Home Assistant integration for SSD IMS"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "colorlog",
+    "homeassistant",
+    "pip",
+    "pydantic",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "hassil",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
