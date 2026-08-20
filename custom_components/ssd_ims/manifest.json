@@ -9,5 +9,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/baracudaz/ssd-ims/issues",
   "requirements": [],
-  "version": "2.1.5"
+  "version": "2.1.6"
 }

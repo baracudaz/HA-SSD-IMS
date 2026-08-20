@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 2.1.6
+
+- **Bug fix**: The initial statistics backfill (e.g. large `history_days` catch-up on first setup) no longer blocks Home Assistant's startup and can trip its bootstrap timeout; it now runs as a background task while setup completes immediately, with entities updating once the backfill finishes
+- **Internal**: Added a lock around statistics updates so the background backfill task and a regular scheduled poll can't run concurrently against the same statistics
+- **Internal**: Statistics are now flushed to Home Assistant day-by-day during backfill instead of all at once at the end, so progress survives an interrupted or cancelled update
+
 ## Version 2.1.5
 
 - **Maintenance**: Updated release metadata for the 2.1.5 version
