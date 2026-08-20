@@ -1,5 +1,15 @@
 # Changelog
 
+## Version 2.1.9
+
+- **Docs**: Fixed the README's Energy dashboard / long-term statistics examples, which still showed statistic IDs keyed by friendly POD name (`ssd_ims:<pod_name>_...`); they're keyed by the stable POD ID (`ssd_ims:<pod_id>_...`) as of 2.1.8
+- **Docs**: The README's development section didn't mention `make install`, the actual first step needed before `make test`/`make lint` work locally; added
+- **Internal**: `make test-coverage`, referenced by the README but not implemented, now actually runs (`pytest-cov` added as a dependency)
+- **Internal**: Added a `Dependency Review` CI workflow that flags newly introduced vulnerable dependencies on pull requests
+- **Internal**: Added a `CodeQL` CI workflow for static security analysis of the Python code, on push/PR and weekly on a schedule
+- **Internal**: Removed a redundant explicit `pytest-asyncio` install in `make install` and CI — `requirements.txt` already pins it
+- **Internal**: Added test coverage for `helpers.py` (previously untested, including the DST-sensitive UTC conversion in `calculate_yesterday_range`) and the `models.py` validators' error paths
+
 ## Version 2.1.8
 
 - **Bug fix**: Network errors, timeouts, and unexpected responses during login were reported the same way as wrong credentials, forcing a spurious reauthentication prompt instead of a transparent retry. Authentication failures are now raised distinctly from actual credential rejection, so setup correctly raises `ConfigEntryNotReady` (retried automatically) instead of `ConfigEntryAuthFailed` for transient connectivity issues

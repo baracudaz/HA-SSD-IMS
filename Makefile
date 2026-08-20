@@ -1,4 +1,4 @@
-.PHONY: help install format lint check test dev clean docker-up docker-down docker-logs docker-shell docker-restart
+.PHONY: help install format lint check test test-coverage dev clean docker-up docker-down docker-logs docker-shell docker-restart
 
 .DEFAULT_GOAL := help
 
@@ -22,6 +22,7 @@ help:
 	@echo "  lint             Run ruff checks"
 	@echo "  check            Run formatting and lint checks (no auto-fix)"
 	@echo "  test             Run test suite"
+	@echo "  test-coverage    Run test suite with coverage report"
 	@echo "  dev              Run format, lint and tests"
 	@echo ""
 	@echo "Docker:"
@@ -38,7 +39,6 @@ install:
 	$(PYTHON) -m venv $(VENV)
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt
-	$(PIP) install pytest-asyncio
 
 format:
 	$(RUFF) format .
@@ -52,6 +52,9 @@ check:
 
 test:
 	$(PYTEST) tests/ -v --asyncio-mode=auto
+
+test-coverage:
+	$(PYTEST) tests/ -v --asyncio-mode=auto --cov=custom_components/ssd_ims --cov-report=term-missing --cov-report=html
 
 dev: format lint test
 

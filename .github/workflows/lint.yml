@@ -47,9 +47,7 @@ jobs:
           cache: "pip"
 
       - name: Install requirements
-        run: |
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install pytest-asyncio
+        run: python3 -m pip install -r requirements.txt
 
       - name: Test
         run: python3 -m pytest tests/ -v --asyncio-mode=auto
