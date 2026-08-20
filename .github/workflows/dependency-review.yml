@@ -19,3 +19,15 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # GHSA-5hxg-r395-fqxx (path traversal via backup upload during
+          # onboarding, fixed in homeassistant 2026.6.0, not yet available
+          # to pin here) applies to a running, network-reachable HA server
+          # mid-onboarding. `homeassistant` here is a dev/test-only
+          # dependency (see requirements.txt) used by an in-process test
+          # harness that's never exposed to a network — not a runtime
+          # dependency of this integration, which has no manifest.json HA
+          # version pin at all and runs inside whatever HA core the end
+          # user already has installed. Re-evaluate this allowlist entry
+          # once a patched homeassistant release is available to pin.
+          allow-ghsas: GHSA-5hxg-r395-fqxx
