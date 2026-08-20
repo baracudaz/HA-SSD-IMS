@@ -22,7 +22,6 @@ from .const import (
     CONF_POINT_OF_DELIVERY,
     DEFAULT_POINT_OF_DELIVERY,
     DOMAIN,
-    PERIOD_YESTERDAY,
     SENSOR_TYPE_ACTUAL_CONSUMPTION,
     SENSOR_TYPE_ACTUAL_SUPPLY,
     SENSOR_TYPE_LABELS,
@@ -55,7 +54,6 @@ async def async_setup_entry(
                 SsdImsYesterdaySensor(
                     coordinator,
                     sensor_type,
-                    PERIOD_YESTERDAY,
                     pod_id,
                     friendly_name,
                 )
@@ -107,14 +105,12 @@ class SsdImsEnergySensor(SsdImsSensor):
         self,
         coordinator: SsdImsDataCoordinator,
         sensor_type: str,
-        period: str,
         pod_id: str,
         friendly_name: str,
     ) -> None:
         """Initialize energy sensor."""
         super().__init__(coordinator, pod_id, friendly_name)
         self.sensor_type = sensor_type
-        self.period = period
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
 
@@ -133,12 +129,11 @@ class SsdImsYesterdaySensor(SsdImsEnergySensor):
         self,
         coordinator: SsdImsDataCoordinator,
         sensor_type: str,
-        period: str,
         pod_id: str,
         friendly_name: str,
     ) -> None:
         """Initialize yesterday sensor."""
-        super().__init__(coordinator, sensor_type, period, pod_id, friendly_name)
+        super().__init__(coordinator, sensor_type, pod_id, friendly_name)
         # This is a self-contained daily snapshot, replaced once a day, and
         # can legitimately be lower than the previous day's value — not a
         # running total. TOTAL_INCREASING would make HA generate its own
@@ -161,8 +156,7 @@ class SsdImsYesterdaySensor(SsdImsEnergySensor):
             return None
 
         aggregated_data = pod_data.get("aggregated_data", {})
-        period_data = aggregated_data.get(self.period, {})
-        value = period_data.get(self.sensor_type)
+        value = aggregated_data.get(self.sensor_type)
         return float(value) if value is not None else None
 
 
@@ -177,7 +171,7 @@ class SsdImsCumulativeSensor(SsdImsEnergySensor):
         friendly_name: str,
     ) -> None:
         """Initialize cumulative sensor."""
-        super().__init__(coordinator, sensor_type, "", pod_id, friendly_name)
+        super().__init__(coordinator, sensor_type, pod_id, friendly_name)
         # This one genuinely mirrors an ever-increasing running total read
         # back from the coordinator's own statistics.
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING

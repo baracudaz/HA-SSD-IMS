@@ -4,7 +4,27 @@ import re
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+
+
+def _extract_pod_id(text: str) -> str:
+    """Extract the stable 16-20 character POD ID from free-text POD data.
+
+    Raises:
+        ValueError: If a valid POD ID cannot be extracted from ``text``.
+    """
+    # Format is typically "99XXX1234560000G (Rodinný dom)" — look for a
+    # 16-20 character alphanumeric ID at the start.
+    if match := re.match(r"^([A-Z0-9]{16,20})", text):
+        return match.group(1)
+
+    # Or the text may already be a bare POD ID with nothing else appended.
+    if re.match(r"^[A-Z0-9]{16,20}$", text):
+        return text
+
+    raise ValueError(
+        f"Could not extract valid POD ID from text: {text} (length: {len(text)})"
+    )
 
 
 class UserProfile(BaseModel):
@@ -28,45 +48,28 @@ class AuthResponse(BaseModel):
 
 
 class PointOfDelivery(BaseModel):
-    """Point of delivery model."""
+    """Point of delivery model.
+
+    ``id`` — the stable POD ID — is extracted from ``text`` once, at
+    construction time, rather than lazily on every access: a POD with
+    unparseable text now fails to construct at all (raising ValidationError,
+    a ValueError subclass) instead of silently existing as a half-valid
+    object whose `.id` can blow up wherever it happens to be read. Callers
+    that construct PointOfDelivery from API data (see
+    SsdImsApiClient.get_points_of_delivery) handle that single point of
+    failure by skipping the offending entry, so every PointOfDelivery
+    instance that exists elsewhere in the codebase is guaranteed to have a
+    valid, side-effect-free `.id`.
+    """
 
     text: str
     value: str
+    id: str = ""
 
-    @property
-    def id(self) -> str:
-        """Extract stable 16-20 character POD ID from text.
-
-        Returns:
-            Extracted POD ID (16-20 chars)
-
-        Raises:
-            ValueError: If a valid POD ID cannot be extracted
-        """
-        # First, try to extract POD number from format like
-        # "99XXX1234560000G (Rodinný dom)"
-        # Look for 16-20 character alphanumeric strings at the start
-        match = re.search(r"^([A-Z0-9]{16,20})", self.text)
-        if match:
-            extracted_id = match.group(1)
-            # Verify it's exactly 16-20 characters
-            if 16 <= len(extracted_id) <= 20:
-                return extracted_id
-            else:
-                raise ValueError(
-                    f"Extracted ID length invalid: {extracted_id} "
-                    f"(length: {len(extracted_id)}, expected 16-20)"
-                )
-
-        # If that fails, check if it's already a POD number format (16-20 chars)
-        if re.match(r"^[A-Z0-9]{16,20}$", self.text):
-            return self.text
-
-        # If we get here, we couldn't extract a valid POD ID
-        raise ValueError(
-            f"Could not extract valid POD ID from text: {self.text} "
-            f"(length: {len(self.text)})"
-        )
+    @model_validator(mode="after")
+    def _populate_id(self) -> "PointOfDelivery":
+        self.id = _extract_pod_id(self.text)
+        return self
 
 
 class ChartData(BaseModel):

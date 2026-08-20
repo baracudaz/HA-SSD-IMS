@@ -264,7 +264,16 @@ class SsdImsApiClient:
             type(data).__name__,
             len(data) if isinstance(data, list) else "N/A",
         )
-        pods = [PointOfDelivery(**pod) for pod in data]
+        pods = []
+        for raw_pod in data:
+            try:
+                pods.append(PointOfDelivery(**raw_pod))
+            except ValidationError as e:
+                # A single POD with unparseable text (e.g. the portal
+                # changes its display format) must not take down discovery
+                # for every other, valid POD.
+                _LOGGER.warning("Skipping POD with invalid data: %s - %s", raw_pod, e)
+
         self._pods_cache = pods
         self._pods_cache_ts = datetime.now(UTC)
         _LOGGER.debug("Retrieved %d points of delivery", len(pods))

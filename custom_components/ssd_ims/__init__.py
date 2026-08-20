@@ -115,17 +115,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
                 pods = await _async_get_pods(hass, username, password)
                 if pods is not None:
-                    pod_mapping: dict[str, str] = {}  # session_id -> stable_id
-
-                    for pod in pods:
-                        try:
-                            pod_mapping[pod.value] = pod.id
-                        except ValueError as e:
-                            _LOGGER.warning(
-                                "Skipping POD with invalid ID format: %s - %s",
-                                pod.text,
-                                e,
-                            )
+                    # get_points_of_delivery() already filters out any POD it
+                    # couldn't parse a stable ID for.
+                    pod_mapping = {
+                        pod.value: pod.id for pod in pods
+                    }  # session_id -> stable_id
 
                     _LOGGER.debug(
                         "Available PODs for migration: %s",
@@ -173,17 +167,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     )
                     return False
 
-                pod_text_to_id: dict[str, str] = {}  # text -> stable_id
-
-                for pod in pods:
-                    try:
-                        pod_text_to_id[pod.text] = pod.id
-                    except ValueError as e:
-                        _LOGGER.warning(
-                            "Skipping POD with invalid ID format: %s - %s",
-                            pod.text,
-                            e,
-                        )
+                # get_points_of_delivery() already filters out any POD it
+                # couldn't parse a stable ID for.
+                pod_text_to_id = {pod.text: pod.id for pod in pods}  # text -> stable_id
 
                 _LOGGER.debug(
                     "Available POD stable IDs: %s",

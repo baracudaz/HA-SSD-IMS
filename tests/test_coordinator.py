@@ -192,26 +192,29 @@ class TestStatisticIdKeying:
 
 
 class TestPodDiscovery:
-    """Regression tests for _discover_pods robustness."""
+    """Regression tests for _discover_pods robustness.
 
-    async def test_pod_with_invalid_id_is_skipped_not_fatal(self):
-        """A single POD whose text can't be parsed into a stable ID must not
-        take down discovery for every other, valid POD."""
-        valid_pod = PointOfDelivery(text="99XXX1234560000G (Home)", value="v1")
-        invalid_pod = PointOfDelivery(text="not-a-valid-pod-id", value="v2")
+    Filtering out PODs with unparseable text now happens one layer down, in
+    SsdImsApiClient.get_points_of_delivery (see test_api_client.py) — every
+    PointOfDelivery that exists at all is guaranteed to have a valid `.id`.
+    These tests confirm the coordinator correctly trusts and uses whatever
+    valid list the API client hands back.
+    """
+
+    async def test_discover_pods_builds_pods_dict_and_seeds_cache(self):
+        pod_a = PointOfDelivery(text="99XXX1234560000G (Home)", value="v1")
+        pod_b = PointOfDelivery(text="99YYY9876540000G (Garage)", value="v2")
 
         api_client = MagicMock()
-        api_client.get_points_of_delivery = AsyncMock(
-            return_value=[valid_pod, invalid_pod]
-        )
+        api_client.get_points_of_delivery = AsyncMock(return_value=[pod_a, pod_b])
         api_client.set_cached_pods = MagicMock()
 
         coordinator = _make_coordinator(api_client, {})
 
         await coordinator._discover_pods()
 
-        assert list(coordinator.pods.keys()) == [valid_pod.id]
-        api_client.set_cached_pods.assert_called_once_with([valid_pod])
+        assert coordinator.pods == {pod_a.id: pod_a, pod_b.id: pod_b}
+        api_client.set_cached_pods.assert_called_once_with([pod_a, pod_b])
 
     async def test_authentication_error_becomes_config_entry_auth_failed(self):
         """A typed auth failure from the API client must be translated into

@@ -124,6 +124,28 @@ class TestSsdImsApiClient:
                 assert pods[0].text == "99XXX1234560000G (Rodinný dom)"
                 assert pods[0].value == "test_pod_id"
 
+        async def test_pod_with_unparseable_text_is_skipped_not_fatal(self, api_client):
+            """A single POD whose text can't be parsed into a stable ID
+            (e.g. the portal changes its display format) must not take down
+            discovery for every other, valid POD."""
+            api_client._authenticated = True
+            raw_pods = [
+                {"text": "99XXX1234560000G (Rodinný dom)", "value": "good"},
+                {"text": "not a valid pod identifier", "value": "bad"},
+            ]
+
+            with patch.object(api_client._session, "request") as mock_request:
+                mock_response = AsyncMock()
+                mock_response.json = AsyncMock(return_value=raw_pods)
+                mock_response.status = 200
+                mock_response.headers = {"content-type": "application/json"}
+                mock_request.return_value.__aenter__.return_value = mock_response
+
+                pods = await api_client.get_points_of_delivery()
+
+                assert len(pods) == 1
+                assert pods[0].value == "good"
+
         async def test_empty_pods_response(self, api_client):
             """Test handling of empty POD response."""
             api_client._authenticated = True
@@ -406,35 +428,33 @@ class TestPodIdExtraction:
 class TestSsdImsSensor:
     """Test suite for SSD IMS sensor entities."""
 
-    def test_ssd_ims_sensors_enabled_by_default_for_all_periods_and_types(self):
-        """Ensure SSD IMS sensors are enabled by default for all periods and sensor types."""
+    def test_ssd_ims_sensors_enabled_by_default_for_all_sensor_types(self):
+        """Ensure SSD IMS sensors are enabled by default for all sensor types."""
         from custom_components.ssd_ims.sensor import SsdImsYesterdaySensor
 
-        # Create a mock coordinator with minimal structure for all periods
         mock_coordinator = MagicMock()
         mock_coordinator.data = {
             "pod_id_123": {
-                "aggregated_data": {
-                    "yesterday": {"actual_consumption": 10.5, "actual_supply": 2.3}
-                }
+                "aggregated_data": {"actual_consumption": 10.5, "actual_supply": 2.3}
             }
         }
 
         pod_id = "pod_id_123"
-        periods = ("yesterday",)
         sensor_types = ("actual_consumption", "actual_supply")
 
-        for period in periods:
-            for sensor_type in sensor_types:
-                sensor = SsdImsYesterdaySensor(
-                    coordinator=mock_coordinator,
-                    sensor_type=sensor_type,
-                    period=period,
-                    pod_id=pod_id,
-                    friendly_name="Home",
-                )
+        for sensor_type in sensor_types:
+            sensor = SsdImsYesterdaySensor(
+                coordinator=mock_coordinator,
+                sensor_type=sensor_type,
+                pod_id=pod_id,
+                friendly_name="Home",
+            )
 
-                assert sensor.entity_registry_enabled_default is True
+            assert sensor.entity_registry_enabled_default is True
+            assert (
+                sensor.native_value
+                == mock_coordinator.data[pod_id]["aggregated_data"][sensor_type]
+            )
 
     def test_yesterday_sensor_is_not_total_increasing(self):
         """The yesterday sensor is a daily snapshot that can legitimately
@@ -448,7 +468,6 @@ class TestSsdImsSensor:
         sensor = SsdImsYesterdaySensor(
             coordinator=MagicMock(),
             sensor_type="actual_consumption",
-            period="yesterday",
             pod_id="pod_id_123",
             friendly_name="Home",
         )

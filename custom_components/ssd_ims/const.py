@@ -62,9 +62,5 @@ SENSOR_TYPE_LABELS: Final = {
     SENSOR_TYPE_ACTUAL_SUPPLY: "Actual Supply",
 }
 
-
-# Time periods configuration
-PERIOD_YESTERDAY: Final = "yesterday"
-
 # POD naming validation
 POD_NAME_MAX_LENGTH: Final = 50

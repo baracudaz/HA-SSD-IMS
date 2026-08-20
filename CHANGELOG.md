@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 2.2.0
+
+- **Internal**: `PointOfDelivery.id` no longer parses/validates the stable POD ID lazily on every property access (where a bad value could raise unpredictably wherever `.id` happened to be read). It's now extracted once at construction time; a POD with unparseable text now fails to construct at all. `SsdImsApiClient.get_points_of_delivery()` is the single point that handles this failure, skipping the offending POD — every `PointOfDelivery` instance that exists anywhere else in the codebase is now guaranteed to have a valid `.id`, which let several defensive per-access `try/except` blocks in `config_flow.py`, `coordinator.py`, and `__init__.py`'s migration code be simplified away
+- **Internal**: Removed the `chart_data_by_period`/`PERIOD_YESTERDAY` abstraction in the coordinator and sensor platform — it existed to support multiple time periods, but only "yesterday" was ever populated. `aggregated_data` is now a flat `{sensor_type: value}` dict instead of `{period: {sensor_type: value}}`, and the yesterday sensor no longer takes an unused `period` argument. No behavior change; this only removes an unused abstraction layer
+
 ## Version 2.1.9
 
 - **Docs**: Fixed the README's Energy dashboard / long-term statistics examples, which still showed statistic IDs keyed by friendly POD name (`ssd_ims:<pod_name>_...`); they're keyed by the stable POD ID (`ssd_ims:<pod_id>_...`) as of 2.1.8

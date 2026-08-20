@@ -15,15 +15,17 @@ class TestPointOfDeliveryId:
         pod = PointOfDelivery(text="99XXX1234560000G", value="v1")
         assert pod.id == "99XXX1234560000G"
 
-    def test_unparseable_text_raises_value_error(self):
-        pod = PointOfDelivery(text="not a valid pod identifier", value="v1")
+    def test_unparseable_text_fails_construction(self):
+        """ID extraction happens once, at construction time — a POD with
+        unparseable text fails to construct at all (ValidationError, which
+        is also a ValueError) rather than existing as a half-valid object
+        whose `.id` can raise wherever it's later accessed."""
         with pytest.raises(ValueError, match="Could not extract valid POD ID"):
-            _ = pod.id
+            PointOfDelivery(text="not a valid pod identifier", value="v1")
 
-    def test_too_short_id_like_text_raises_value_error(self):
-        pod = PointOfDelivery(text="TOOSHORT123 (Home)", value="v1")
+    def test_too_short_id_like_text_fails_construction(self):
         with pytest.raises(ValueError):
-            _ = pod.id
+            PointOfDelivery(text="TOOSHORT123 (Home)", value="v1")
 
 
 class TestChartDataFloatListValidation:

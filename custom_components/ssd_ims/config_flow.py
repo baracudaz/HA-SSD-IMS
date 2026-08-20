@@ -178,15 +178,10 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._selected_pods = selected_pods
                 return await self.async_step_pod_naming()
 
-        # Create POD selection options using stable pod.id instead of session pod.value
-        pod_options = {}
-        for pod in self._pods:
-            try:
-                pod_options[pod.id] = pod.text
-            except ValueError as e:
-                _LOGGER.warning(
-                    "Skipping POD with invalid ID format: %s - %s", pod.text, e
-                )
+        # Create POD selection options using stable pod.id instead of session
+        # pod.value. get_points_of_delivery() already filters out any POD it
+        # couldn't parse a stable ID for, so every pod here is valid.
+        pod_options = {pod.id: pod.text for pod in self._pods}
 
         # When reconfiguring, pre-select the currently configured PODs via schema default
         if self._reconfiguring:

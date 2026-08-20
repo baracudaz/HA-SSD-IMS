@@ -35,7 +35,6 @@ from .const import (
     DEFAULT_HISTORY_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    PERIOD_YESTERDAY,
     SENSOR_TYPE_ACTUAL_CONSUMPTION,
     SENSOR_TYPE_ACTUAL_SUPPLY,
 )
@@ -146,12 +145,9 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                 if not pod:
                     continue
 
-                chart_data_by_period = {}
                 try:
                     period_start, period_end = calculate_yesterday_range(now)
-                    chart_data_by_period[
-                        PERIOD_YESTERDAY
-                    ] = await self.api_client.get_chart_data(
+                    chart_data = await self.api_client.get_chart_data(
                         pod_id, period_start, period_end
                     )
                 except Exception as e:
@@ -160,16 +156,13 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                     )
                     continue
 
-                aggregated_data = self._aggregate_data(chart_data_by_period)
                 pod_data = all_pod_data.setdefault(pod_id, {})
                 pod_data.update(
                     {
-                        "aggregated_data": aggregated_data,
+                        "aggregated_data": self._aggregate_data(chart_data),
                         "last_update": now.isoformat(),
                     }
                 )
-                for period_key, chart_data in chart_data_by_period.items():
-                    pod_data[f"chart_data_{period_key}"] = chart_data
 
             if stats_complete:
                 self._last_successful_data_date = today
@@ -476,41 +469,21 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         if not pods:
             raise RuntimeError("No points of delivery found")
 
-        self.pods = {}
-        for pod in pods:
-            try:
-                self.pods[pod.id] = pod
-            except ValueError as e:
-                # A single POD with an unparseable text field must not take
-                # down discovery for every other (valid) POD.
-                _LOGGER.warning(
-                    "Skipping POD with invalid ID format: %s - %s", pod.text, e
-                )
+        # get_points_of_delivery() already filters out any POD it couldn't
+        # parse a stable ID for, so every pod here is guaranteed valid.
+        self.pods = {pod.id: pod for pod in pods}
 
         # Seed the API client's own POD cache so it doesn't need a redundant
         # re-fetch the next time it resolves a stable POD id (e.g. during a
         # long-running statistics backfill).
         self.api_client.set_cached_pods(list(self.pods.values()))
 
-    def _aggregate_data(
-        self, chart_data_by_period: dict[str, ChartData]
-    ) -> dict[str, dict[str, float]]:
-        """Aggregate data for other (non-energy) sensors."""
-        aggregated: dict[str, dict[str, float]] = {}
+    def _aggregate_data(self, chart_data: ChartData | None) -> dict[str, float]:
+        """Aggregate yesterday's chart data into per-sensor-type totals."""
+        if chart_data is None:
+            return dict.fromkeys(ENABLED_SENSOR_TYPES, 0.0)
 
-        for period_key, chart_data in chart_data_by_period.items():
-            aggregated[period_key] = {}
-
-            if chart_data and hasattr(chart_data, "sum_actual_consumption"):
-                if SENSOR_TYPE_ACTUAL_CONSUMPTION in ENABLED_SENSOR_TYPES:
-                    aggregated[period_key][SENSOR_TYPE_ACTUAL_CONSUMPTION] = (
-                        chart_data.sum_actual_consumption or 0.0
-                    )
-                if SENSOR_TYPE_ACTUAL_SUPPLY in ENABLED_SENSOR_TYPES:
-                    aggregated[period_key][SENSOR_TYPE_ACTUAL_SUPPLY] = (
-                        chart_data.sum_actual_supply or 0.0
-                    )
-            else:
-                for sensor_type in ENABLED_SENSOR_TYPES:
-                    aggregated[period_key][sensor_type] = 0.0
-        return aggregated
+        return {
+            SENSOR_TYPE_ACTUAL_CONSUMPTION: chart_data.sum_actual_consumption or 0.0,
+            SENSOR_TYPE_ACTUAL_SUPPLY: chart_data.sum_actual_supply or 0.0,
+        }
