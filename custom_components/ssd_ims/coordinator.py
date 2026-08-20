@@ -273,10 +273,13 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                 if start_date >= end_date:
                     continue
 
-                # Track whether the portal has published data for the pending dates.
-                # If no data comes back for any day in the range, the portal hasn't
-                # published yet and we should retry on the next scheduled poll.
-                got_any_data = False
+                # Track whether the portal has published data through the most
+                # recent pending day (yesterday). Earlier days in the range may
+                # legitimately have data while the latest day doesn't yet, so
+                # completeness is judged on that last day specifically, not on
+                # whether any day in the range returned data.
+                last_pending_day = end_date - timedelta(days=1)
+                got_last_day_data = False
                 metadata = {
                     "has_sum": True,
                     "mean_type": StatisticMeanType.NONE,
@@ -301,7 +304,8 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                             current_date += timedelta(days=1)
                             continue
 
-                        got_any_data = True
+                        if day_start == last_pending_day:
+                            got_last_day_data = True
                         hourly_data: dict[datetime, float] = {}
                         for i, timestamp_str in enumerate(chart_data.metering_datetime):
                             value = (
@@ -360,8 +364,8 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
 
                     current_date += timedelta(days=1)
 
-                if not got_any_data:
-                    # Portal has not published data for the pending dates yet
+                if not got_last_day_data:
+                    # Portal has not published yesterday's data yet
                     _LOGGER.debug(
                         "No data available yet for %s (pending from %s) — will retry",
                         statistic_id,

@@ -5,6 +5,8 @@
 - **Bug fix**: The initial statistics backfill (e.g. large `history_days` catch-up on first setup) no longer blocks Home Assistant's startup and can trip its bootstrap timeout; it now runs as a background task while setup completes immediately, with entities updating once the backfill finishes
 - **Internal**: Added a lock around statistics updates so the background backfill task and a regular scheduled poll can't run concurrently against the same statistics
 - **Internal**: Statistics are now flushed to Home Assistant day-by-day during backfill instead of all at once at the end, so progress survives an interrupted or cancelled update
+- **Bug fix**: Smart-polling completeness was judged on whether *any* day in the backfill range had published data; a pod/sensor with older data but no data for yesterday yet was incorrectly marked complete, skipping retries for the rest of the day. It's now judged on the most recent pending day specifically
+- **Bug fix**: Restored explicit `aiohttp`/`pydantic` entries in `manifest.json` requirements — both are imported directly by the integration and shouldn't rely on Home Assistant core bundling compatible versions
 
 ## Version 2.1.5
 
