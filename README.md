@@ -108,7 +108,7 @@ To add SSD IMS data to your Energy dashboard:
 
 ### Prerequisites
 
-- Python 3.13+
+- Python 3.14+
 - Docker and Docker Compose
 - Home Assistant 2026.2+
 

@@ -9,11 +9,12 @@ A Home Assistant custom integration (HACS) for the SSD IMS energy portal (`https
 ## Commands
 
 ```bash
-make install         # create .venv and install requirements.txt + pytest-asyncio
+make install         # create .venv and install requirements.txt (pins all dev/test deps)
 make format           # ruff format .
 make lint             # ruff check . --fix
 make check            # format --check + lint, no auto-fix (what CI runs)
 make test             # pytest tests/ -v --asyncio-mode=auto
+make test-coverage    # pytest with coverage report (term + htmlcov/)
 make dev              # format + lint + test
 
 make docker-up        # start a real Home Assistant instance in Docker with this
@@ -24,7 +25,7 @@ make docker-down
 
 Run a single test: `.venv/bin/python -m pytest tests/test_api_client.py::TestSsdImsApiClient::TestAuthentication::test_successful_authentication -v`
 
-`asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions don't need `@pytest.mark.asyncio`.
+`asyncio_mode = "auto"` is set in `pytest.ini`, so async test functions don't need `@pytest.mark.asyncio`. There is no `pyproject.toml` in this repo — `requirements.txt` is the single, pinned source of truth for dev/test dependencies, and neither Home Assistant's integration loader nor HACS reads project-level Python packaging metadata (they only read `custom_components/ssd_ims/manifest.json` and `hacs.json`), so there was nothing else it would have been needed for.
 
 `scripts/develop` runs Home Assistant directly (non-Docker) against `./config`, with `custom_components/` on `PYTHONPATH`.
 
@@ -58,7 +59,7 @@ The portal only ever has data through "yesterday", published once after midnight
 
 ## Conventions
 
-- Python 3.13+, Pydantic v2 for API response models, `ruff` for lint/format (no separate mypy/pylint config in this repo despite `.github/copilot-instructions.md` referencing them — that file documents Home Assistant core's own conventions and quality-scale process; only the general HA integration patterns it describes apply here, not its literal tool invocations).
+- Python 3.14+ (the pinned `homeassistant` release in `requirements.txt` requires it; the integration code itself has no such floor — it runs inside whatever Python the end user's Home Assistant core provides), Pydantic v2 for API response models, `ruff` for lint/format (no separate mypy/pylint config in this repo despite `.github/copilot-instructions.md` referencing them — that file documents Home Assistant core's own conventions and quality-scale process; only the general HA integration patterns it describes apply here, not its literal tool invocations).
 - Config-critical data (credentials, POD selection, naming) lives in `ConfigEntry.data`; only `scan_interval` is adjustable post-setup via `ConfigEntry.options`/the options flow.
 - Polling interval is user-configurable in this integration's config flow (`SCAN_INTERVAL_OPTIONS`) — this is an intentional exception to the usual HA guidance against configurable scan intervals, because the source data's daily publish cadence makes it a meaningful, bounded choice for the user.
 - `CHANGELOG.md` is maintained by hand per release, grouped under `## Version X.Y.Z` with bolded change-type prefixes (`**New feature**`, `**Bug fix**`, `**Internal**`, `**Metadata**`, `**Docs**`, `**Maintenance**`). Bump `manifest.json` `"version"` alongside changelog entries.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 2.2.2
+
+- **Internal**: The dev/test `homeassistant` pin (2026.2.1, later briefly 2026.2.3) was affected by two known CVEs (GHSA-5hxg-r395-fqxx, critical; GHSA-x84v-g949-293w, high), both fixed in 2026.6.0+. The pin is now 2026.8.2, the current release; `pydantic`, `pytest`, `pytest-homeassistant-custom-component`, `colorlog`, and `hassil` were bumped alongside it to matching compatible versions. This required raising the minimum Python version for local dev/test tooling to 3.14 (the integration itself has no such requirement — it runs inside whatever Python the end user's Home Assistant core provides)
+- **Internal**: Removed `pyproject.toml`. It held only an unused, non-installable `[project]` block (no `[build-system]`, and its `dependencies` list duplicated `requirements.txt`, the actual source of truth used by `Makefile`/CI) plus `[tool.pytest.ini_options]`, which is now a small standalone `pytest.ini`. Neither Home Assistant's integration loader nor HACS ever read this file — both read `custom_components/ssd_ims/manifest.json` and `hacs.json` — so nothing outside local dev tooling was affected
+
 ## Version 2.2.1
 
 - **Bug fix**: Submitting the POD selection step with nothing selected raised a generic, untranslated schema-validation error instead of the intended "Please select at least one Point of Delivery" message — the schema's own `vol.Length(min=1)` rejected the empty selection before the step's own (correct) error handling ever ran. Removed the redundant schema-level check so the friendly error is actually shown
