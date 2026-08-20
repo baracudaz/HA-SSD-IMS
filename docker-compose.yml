@@ -1,9 +1,7 @@
 ---
-
 services:
   homeassistant:
     image: "ghcr.io/home-assistant/home-assistant:stable"
-    container_name: ha-ssd-ims-dev
     environment:
       - TZ=Europe/Bratislava
     volumes:
@@ -13,20 +11,3 @@ services:
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "8123:8123"
-
-  # Development service for pylint (more lenient)
-  pylint:
-    image: python:3.11-slim
-    container_name: ha-ssd-ims-pylint
-    working_dir: /app
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONPATH=/app
-    command: >
-      sh -c "
-        pip install -r requirements-test.txt &&
-        echo 'Running pylint checks...' &&
-        pylint custom_components/ssd_ims/ --rcfile=.pylintrc &&
-        echo 'Pylint complete!'
-      "

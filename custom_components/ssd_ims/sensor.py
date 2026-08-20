@@ -22,7 +22,6 @@ from .const import (
     CONF_POINT_OF_DELIVERY,
     DEFAULT_POINT_OF_DELIVERY,
     DOMAIN,
-    PERIOD_YESTERDAY,
     SENSOR_TYPE_ACTUAL_CONSUMPTION,
     SENSOR_TYPE_ACTUAL_SUPPLY,
     SENSOR_TYPE_LABELS,
@@ -55,7 +54,6 @@ async def async_setup_entry(
                 SsdImsYesterdaySensor(
                     coordinator,
                     sensor_type,
-                    PERIOD_YESTERDAY,
                     pod_id,
                     friendly_name,
                 )
@@ -107,17 +105,14 @@ class SsdImsEnergySensor(SsdImsSensor):
         self,
         coordinator: SsdImsDataCoordinator,
         sensor_type: str,
-        period: str,
         pod_id: str,
         friendly_name: str,
     ) -> None:
         """Initialize energy sensor."""
         super().__init__(coordinator, pod_id, friendly_name)
         self.sensor_type = sensor_type
-        self.period = period
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     def _generate_sensor_name(self, suffix: str) -> str:
         """Generate sensor name based on type and suffix."""
@@ -134,12 +129,22 @@ class SsdImsYesterdaySensor(SsdImsEnergySensor):
         self,
         coordinator: SsdImsDataCoordinator,
         sensor_type: str,
-        period: str,
         pod_id: str,
         friendly_name: str,
     ) -> None:
         """Initialize yesterday sensor."""
-        super().__init__(coordinator, sensor_type, period, pod_id, friendly_name)
+        super().__init__(coordinator, sensor_type, pod_id, friendly_name)
+        # This is a self-contained daily snapshot, replaced once a day, and
+        # can legitimately be lower than the previous day's value — not a
+        # running total. TOTAL_INCREASING/TOTAL would make HA generate its
+        # own long-term statistics for this entity, duplicating (and
+        # potentially conflicting with) the external statistics the
+        # coordinator writes directly for the Energy dashboard. MEASUREMENT
+        # isn't a legal alternative either: HA's ENERGY device class only
+        # accepts state_class None, TOTAL, or TOTAL_INCREASING (using
+        # MEASUREMENT logs an "impossible" warning and is expected to raise
+        # in a future HA version) — so leave state_class unset (None), which
+        # also means no HA-generated statistics at all for this entity.
 
         sensor_name = self._generate_sensor_name("Yesterday")
         sanitized_sensor_name = sanitize_name(sensor_name)
@@ -155,8 +160,7 @@ class SsdImsYesterdaySensor(SsdImsEnergySensor):
             return None
 
         aggregated_data = pod_data.get("aggregated_data", {})
-        period_data = aggregated_data.get(self.period, {})
-        value = period_data.get(self.sensor_type)
+        value = aggregated_data.get(self.sensor_type)
         return float(value) if value is not None else None
 
 
@@ -171,7 +175,10 @@ class SsdImsCumulativeSensor(SsdImsEnergySensor):
         friendly_name: str,
     ) -> None:
         """Initialize cumulative sensor."""
-        super().__init__(coordinator, sensor_type, "", pod_id, friendly_name)
+        super().__init__(coordinator, sensor_type, pod_id, friendly_name)
+        # This one genuinely mirrors an ever-increasing running total read
+        # back from the coordinator's own statistics.
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
         sensor_name = self._generate_sensor_name("Total")
         sanitized_sensor_name = sanitize_name(sensor_name)

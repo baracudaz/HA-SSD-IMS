@@ -8,17 +8,15 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .coverage
+htmlcov/
 cytho
 .ansible/
 .vscode/
 .idea/
 .DS_Store
 .claude/
-pyproject.toml
-uv.lock
 scritps/
 config/
-.python-version
 dist/
 .ruff_cache/
 

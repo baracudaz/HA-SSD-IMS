@@ -2,10 +2,14 @@
 
 import logging
 import re
+
+from aiohttp import ClientError
+from pydantic import ValidationError
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_client import SsdImsApiClient
@@ -47,7 +51,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: SsdImsConfigEntry) -> bo
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
 
-    if not await api_client.authenticate(username, password):
+    try:
+        authenticated = await api_client.authenticate(username, password)
+    except (ClientError, TimeoutError, RuntimeError, ValidationError) as err:
+        # Network/timeout/server/unexpected-response problems are transient
+        # or portal-side, not proof the credentials are wrong — let HA retry
+        # instead of forcing the user through a spurious reauth flow.
+        raise ConfigEntryNotReady(f"Cannot connect to SSD IMS: {err}") from err
+
+    if not authenticated:
         raise ConfigEntryAuthFailed("Authentication failed for SSD IMS")
 
     # entry.options takes precedence over entry.data for user-adjustable settings
@@ -103,17 +115,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
                 pods = await _async_get_pods(hass, username, password)
                 if pods is not None:
-                    pod_mapping: dict[str, str] = {}  # session_id -> stable_id
-
-                    for pod in pods:
-                        try:
-                            pod_mapping[pod.value] = pod.id
-                        except ValueError as e:
-                            _LOGGER.warning(
-                                "Skipping POD with invalid ID format: %s - %s",
-                                pod.text,
-                                e,
-                            )
+                    # get_points_of_delivery() already filters out any POD it
+                    # couldn't parse a stable ID for.
+                    pod_mapping = {
+                        pod.value: pod.id for pod in pods
+                    }  # session_id -> stable_id
 
                     _LOGGER.debug(
                         "Available PODs for migration: %s",
@@ -161,17 +167,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     )
                     return False
 
-                pod_text_to_id: dict[str, str] = {}  # text -> stable_id
-
-                for pod in pods:
-                    try:
-                        pod_text_to_id[pod.text] = pod.id
-                    except ValueError as e:
-                        _LOGGER.warning(
-                            "Skipping POD with invalid ID format: %s - %s",
-                            pod.text,
-                            e,
-                        )
+                # get_points_of_delivery() already filters out any POD it
+                # couldn't parse a stable ID for.
+                pod_text_to_id = {pod.text: pod.id for pod in pods}  # text -> stable_id
 
                 _LOGGER.debug(
                     "Available POD stable IDs: %s",

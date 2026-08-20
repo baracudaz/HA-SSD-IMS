@@ -9,6 +9,7 @@ from aiohttp import ClientError
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -64,12 +65,19 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 api_client = SsdImsApiClient(async_get_clientsession(self.hass))
                 if await api_client.authenticate(self._username, self._password):
+                    await self.async_set_unique_id(self._username.lower())
+                    self._abort_if_unique_id_configured()
                     self._pods = await api_client.get_points_of_delivery()
                     return await self.async_step_point_of_delivery()
                 else:
                     errors["base"] = "invalid_auth"
-            except Exception as e:
+            except AbortFlow:
+                raise
+            except (ClientError, asyncio.TimeoutError, RuntimeError) as e:
                 _LOGGER.error("Error during authentication: %s", e)
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected error during authentication")
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
@@ -170,15 +178,10 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._selected_pods = selected_pods
                 return await self.async_step_pod_naming()
 
-        # Create POD selection options using stable pod.id instead of session pod.value
-        pod_options = {}
-        for pod in self._pods:
-            try:
-                pod_options[pod.id] = pod.text
-            except ValueError as e:
-                _LOGGER.warning(
-                    "Skipping POD with invalid ID format: %s - %s", pod.text, e
-                )
+        # Create POD selection options using stable pod.id instead of session
+        # pod.value. get_points_of_delivery() already filters out any POD it
+        # couldn't parse a stable ID for, so every pod here is valid.
+        pod_options = {pod.id: pod.text for pod in self._pods}
 
         # When reconfiguring, pre-select the currently configured PODs via schema default
         if self._reconfiguring:
@@ -192,9 +195,12 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="point_of_delivery",
             data_schema=vol.Schema(
                 {
-                    pods_field: vol.All(
-                        cv.multi_select(pod_options), vol.Length(min=1)
-                    ),
+                    # No vol.Length(min=1) here: an empty selection needs to
+                    # reach the handler above so it can show the friendlier
+                    # "no_pods_selected" error, rather than voluptuous
+                    # rejecting it first with a generic schema-validation
+                    # error the user never sees a translated message for.
+                    pods_field: cv.multi_select(pod_options),
                 }
             ),
             errors=errors,

@@ -47,7 +47,7 @@
       "cannot_connect": "Nedá sa pripojiť k SSD IMS portálu",
       "no_pods_selected": "Vyberte aspoň jedno odberné miesto",
       "invalid_format": "Názov musí obsahovať aspoň jedno písmeno alebo číslo",
-      "too_long": "Názov je príliš dlhý (maximálne 32 znakov)",
+      "too_long": "Názov je príliš dlhý (maximálne 50 znakov)",
       "duplicate_name": "Tento názov sa už používa pre iné OM"
     },
     "abort": {

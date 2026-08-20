@@ -48,6 +48,8 @@ The integration imports energy data into Home Assistant's statistics database wi
 | `ssd_ims:<pod_name>_actual_consumption` | Cumulative energy consumption (kWh) |
 | `ssd_ims:<pod_name>_actual_supply` | Cumulative energy supply/production (kWh) |
 
+`<pod_name>` is derived from the friendly name you assign the POD during setup. **Renaming a POD later (via Reconfigure) changes its statistic ID and starts a new series** — the previous history isn't carried over. Pick a name you're happy to keep, or expect to reconfigure the Energy dashboard source if you rename it.
+
 These statistics can be used directly in the Energy dashboard configuration.
 
 ## Installation
@@ -99,14 +101,14 @@ To add SSD IMS data to your Energy dashboard:
 1. Go to **Settings** → **Dashboards** → **Energy**
 2. Click **Add Consumption** under "Electricity grid"
 3. Select "Use an external statistic"
-4. Search for `ssd_ims:<pod_name>_actual_consumption`
+4. Search for `ssd_ims:<pod_name>_actual_consumption`, using the friendly name you assigned the POD during setup
 5. (Optional) Add supply data similarly for solar production tracking
 
 ## Development
 
 ### Prerequisites
 
-- Python 3.13+
+- Python 3.14+
 - Docker and Docker Compose
 - Home Assistant 2026.2+
 
@@ -117,7 +119,10 @@ To add SSD IMS data to your Energy dashboard:
 git clone https://github.com/baracudaz/ssd-ims.git
 cd ssd-ims
 
-# Start Home Assistant container
+# Create a .venv and install dependencies (needed for make test/lint/format below)
+make install
+
+# Start Home Assistant container for manual/UI testing
 make docker-up
 
 # View logs

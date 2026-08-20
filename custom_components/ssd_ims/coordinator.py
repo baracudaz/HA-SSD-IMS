@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import random
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.recorder import get_instance
@@ -21,17 +21,17 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.util import dt as dt_util
 
-from .api_client import SsdImsApiClient
+from .api_client import SsdImsApiClient, SsdImsAuthenticationError
 from .const import (
     API_DELAY_MAX,
     API_DELAY_MIN,
     CONF_HISTORY_DAYS,
+    CONF_POD_NAME_MAPPING,
     CONF_POINT_OF_DELIVERY,
     CONF_SCAN_INTERVAL,
     DEFAULT_HISTORY_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    PERIOD_YESTERDAY,
     SENSOR_TYPE_ACTUAL_CONSUMPTION,
     SENSOR_TYPE_ACTUAL_SUPPLY,
 )
@@ -142,12 +142,9 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                 if not pod:
                     continue
 
-                chart_data_by_period = {}
                 try:
                     period_start, period_end = calculate_yesterday_range(now)
-                    chart_data_by_period[
-                        PERIOD_YESTERDAY
-                    ] = await self.api_client.get_chart_data(
+                    chart_data = await self.api_client.get_chart_data(
                         pod_id, period_start, period_end
                     )
                 except Exception as e:
@@ -156,16 +153,13 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                     )
                     continue
 
-                aggregated_data = self._aggregate_data(chart_data_by_period)
                 pod_data = all_pod_data.setdefault(pod_id, {})
                 pod_data.update(
                     {
-                        "aggregated_data": aggregated_data,
+                        "aggregated_data": self._aggregate_data(chart_data),
                         "last_update": now.isoformat(),
                     }
                 )
-                for period_key, chart_data in chart_data_by_period.items():
-                    pod_data[f"chart_data_{period_key}"] = chart_data
 
             if stats_complete:
                 self._last_successful_data_date = today
@@ -190,22 +184,37 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         catch-up range can't block Home Assistant's bootstrap timeout.
         """
         try:
-            stats_complete = await self._update_statistics(pod_ids)
+            await self._update_statistics(pod_ids)
         except Exception:
             _LOGGER.exception("Error during background statistics backfill")
             return
 
-        if stats_complete:
-            self._last_successful_data_date = dt_util.now().date()
-
         # Pull the newly imported totals into coordinator.data and notify
-        # entities instead of waiting for the next scheduled poll.
+        # entities instead of waiting for the next scheduled poll. This
+        # re-runs _async_update_data, which sets the smart-polling gate
+        # itself once it confirms completeness — setting it here first
+        # would make that refresh short-circuit on the gate and return the
+        # stale pre-backfill data instead of picking up the new totals.
         await self.async_request_refresh()
 
     def _get_random_api_delay(self) -> float:
         """Get random API delay."""
-        delay = random.uniform(API_DELAY_MIN, API_DELAY_MAX)
-        return max(0.3, delay)
+        return random.uniform(API_DELAY_MIN, API_DELAY_MAX)
+
+    @staticmethod
+    def _build_statistic_id(pod_name: str, sensor_type: str) -> str:
+        """Build the external statistic id for a POD/sensor type.
+
+        Keyed off the user-editable friendly POD name: renaming a POD via
+        the config flow changes its statistic_id and starts a fresh series
+        (see CHANGELOG for the history behind this — the alternative,
+        keying off the stable pod_id with a rename-on-migration path, ran
+        into a Home Assistant core limitation where the statistics-rename
+        primitive silently no-ops for external, non-recorder-source
+        statistics like ours). No published version of this integration
+        has ever used a different scheme, so there's nothing to migrate.
+        """
+        return f"{DOMAIN}:{sanitize_name(pod_name)}_{sensor_type}".lower()
 
     async def _update_statistics(self, pod_ids: list[str]) -> bool:
         """Import statistics for all configured PODs, serialized against
@@ -225,13 +234,11 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         """
         all_up_to_date = True
         for pod_id in pod_ids:
-            pod_name_mapping = self.config.get("pod_name_mapping", {})
+            pod_name_mapping = self.config.get(CONF_POD_NAME_MAPPING, {})
             pod_name = pod_name_mapping.get(pod_id, pod_id)
 
             for sensor_type in ENABLED_SENSOR_TYPES:
-                sanitized_friendly_name = sanitize_name(pod_name)
-                statistic_name = f"{sanitized_friendly_name}_{sensor_type}".lower()
-                statistic_id = f"{DOMAIN}:{statistic_name}"
+                statistic_id = self._build_statistic_id(pod_name, sensor_type)
 
                 last_stats_result = await get_instance(
                     self.hass
@@ -296,8 +303,11 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
 
                     try:
                         await asyncio.sleep(self._get_random_api_delay())
+                        # Convert to UTC before calling the API, matching
+                        # helpers.calculate_yesterday_range — day_start/day_end
+                        # themselves stay local for the comparisons below.
                         chart_data = await self.api_client.get_chart_data(
-                            pod_id, day_start, day_end
+                            pod_id, day_start.astimezone(UTC), day_end.astimezone(UTC)
                         )
 
                         if not chart_data or not chart_data.metering_datetime:
@@ -361,6 +371,15 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                             day_start.date(),
                             e,
                         )
+                        # Stop walking forward for this POD/sensor type instead
+                        # of skipping the failed day: later days would otherwise
+                        # get flushed on top of a cumulative_sum missing this
+                        # day's contribution, and since the next poll resumes
+                        # from the last *persisted* statistic, the gap would
+                        # never be retried and would permanently understate
+                        # the running total.
+                        all_up_to_date = False
+                        break
 
                     current_date += timedelta(days=1)
 
@@ -380,16 +399,14 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Fetch cumulative totals from external statistics."""
         for pod_id, pod_data in pod_data_dict.items():
-            pod_name_mapping = self.config.get("pod_name_mapping", {})
+            pod_name_mapping = self.config.get(CONF_POD_NAME_MAPPING, {})
             pod_name = pod_name_mapping.get(pod_id, pod_id)
 
             if "cumulative_totals" not in pod_data:
                 pod_data["cumulative_totals"] = {}
 
             for sensor_type in ENABLED_SENSOR_TYPES:
-                sanitized_friendly_name = sanitize_name(pod_name)
-                statistic_name = f"{sanitized_friendly_name}_{sensor_type}".lower()
-                statistic_id = f"{DOMAIN}:{statistic_name}"
+                statistic_id = self._build_statistic_id(pod_name, sensor_type)
 
                 last_stats = await get_instance(self.hass).async_add_executor_job(
                     get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
@@ -406,44 +423,29 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         """Discover points of delivery."""
         try:
             pods = await self.api_client.get_points_of_delivery()
-            if not pods:
-                raise RuntimeError("No points of delivery found")
+        except SsdImsAuthenticationError as e:
+            raise ConfigEntryAuthFailed(
+                "Authentication failed during POD discovery"
+            ) from e
 
-            self.pods = {pod.id: pod for pod in pods}
-        except Exception as e:
-            error_msg = str(e)
-            if any(
-                auth_error in error_msg.lower()
-                for auth_error in [
-                    "not authenticated",
-                    "authentication failed",
-                    "session expired",
-                ]
-            ):
-                raise ConfigEntryAuthFailed(
-                    "Authentication failed during POD discovery"
-                ) from e
-            raise
+        if not pods:
+            raise RuntimeError("No points of delivery found")
 
-    def _aggregate_data(
-        self, chart_data_by_period: dict[str, ChartData]
-    ) -> dict[str, dict[str, float]]:
-        """Aggregate data for other (non-energy) sensors."""
-        aggregated: dict[str, dict[str, float]] = {}
+        # get_points_of_delivery() already filters out any POD it couldn't
+        # parse a stable ID for, so every pod here is guaranteed valid.
+        self.pods = {pod.id: pod for pod in pods}
 
-        for period_key, chart_data in chart_data_by_period.items():
-            aggregated[period_key] = {}
+        # Seed the API client's own POD cache so it doesn't need a redundant
+        # re-fetch the next time it resolves a stable POD id (e.g. during a
+        # long-running statistics backfill).
+        self.api_client.set_cached_pods(list(self.pods.values()))
 
-            if chart_data and hasattr(chart_data, "sum_actual_consumption"):
-                if SENSOR_TYPE_ACTUAL_CONSUMPTION in ENABLED_SENSOR_TYPES:
-                    aggregated[period_key][SENSOR_TYPE_ACTUAL_CONSUMPTION] = (
-                        chart_data.sum_actual_consumption or 0.0
-                    )
-                if SENSOR_TYPE_ACTUAL_SUPPLY in ENABLED_SENSOR_TYPES:
-                    aggregated[period_key][SENSOR_TYPE_ACTUAL_SUPPLY] = (
-                        chart_data.sum_actual_supply or 0.0
-                    )
-            else:
-                for sensor_type in ENABLED_SENSOR_TYPES:
-                    aggregated[period_key][sensor_type] = 0.0
-        return aggregated
+    def _aggregate_data(self, chart_data: ChartData | None) -> dict[str, float]:
+        """Aggregate yesterday's chart data into per-sensor-type totals."""
+        if chart_data is None:
+            return dict.fromkeys(ENABLED_SENSOR_TYPES, 0.0)
+
+        return {
+            SENSOR_TYPE_ACTUAL_CONSUMPTION: chart_data.sum_actual_consumption or 0.0,
+            SENSOR_TYPE_ACTUAL_SUPPLY: chart_data.sum_actual_supply or 0.0,
+        }
