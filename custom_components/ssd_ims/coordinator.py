@@ -4,15 +4,12 @@ import asyncio
 import logging
 import random
 from datetime import UTC, date, datetime, timedelta
-from functools import partial
 from typing import Any
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
-    async_update_statistics_metadata,
     get_last_statistics,
-    get_metadata,
     StatisticMeanType,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -67,9 +64,6 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         self.pods: dict[str, PointOfDelivery] = {}
         self._last_successful_data_date: date | None = None
         self._stats_lock = asyncio.Lock()
-        # Legacy statistic_ids we've already warned about being blocked by a
-        # same-named collision — avoids re-logging every poll forever.
-        self._migration_collision_warned: set[str] = set()
 
         scan_interval = timedelta(
             minutes=config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -207,78 +201,19 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         return random.uniform(API_DELAY_MIN, API_DELAY_MAX)
 
     @staticmethod
-    def _build_statistic_id(pod_id: str, sensor_type: str) -> str:
+    def _build_statistic_id(pod_name: str, sensor_type: str) -> str:
         """Build the external statistic id for a POD/sensor type.
 
-        Keyed off the stable pod_id (never the user-editable friendly name)
-        so renaming a POD in the config flow can't orphan its history.
-        """
-        return f"{DOMAIN}:{sanitize_name(pod_id)}_{sensor_type}".lower()
-
-    @staticmethod
-    def _build_legacy_statistic_id(pod_name: str, sensor_type: str) -> str:
-        """Build the pre-migration, friendly-name-derived statistic id.
-
-        Only used to locate and migrate statistics imported by integration
-        versions prior to the pod_id-keyed statistic_id scheme.
+        Keyed off the user-editable friendly POD name: renaming a POD via
+        the config flow changes its statistic_id and starts a fresh series
+        (see CHANGELOG for the history behind this — the alternative,
+        keying off the stable pod_id with a rename-on-migration path, ran
+        into a Home Assistant core limitation where the statistics-rename
+        primitive silently no-ops for external, non-recorder-source
+        statistics like ours). No published version of this integration
+        has ever used a different scheme, so there's nothing to migrate.
         """
         return f"{DOMAIN}:{sanitize_name(pod_name)}_{sensor_type}".lower()
-
-    async def _migrate_statistic_ids(self, pod_ids: list[str]) -> None:
-        """Rename any statistics still stored under the legacy, friendly-name-
-        derived statistic_id to the stable pod_id-derived one, preserving history.
-        """
-        pod_name_mapping = self.config.get(CONF_POD_NAME_MAPPING, {})
-        legacy_ids: dict[str, str] = {}
-        for pod_id in pod_ids:
-            pod_name = pod_name_mapping.get(pod_id, pod_id)
-            for sensor_type in ENABLED_SENSOR_TYPES:
-                new_id = self._build_statistic_id(pod_id, sensor_type)
-                legacy_id = self._build_legacy_statistic_id(pod_name, sensor_type)
-                if legacy_id != new_id:
-                    legacy_ids[legacy_id] = new_id
-
-        if not legacy_ids:
-            return
-
-        # Check both sides at once: whether the legacy id has anything to
-        # migrate, and whether the new id is already (independently)
-        # occupied — renaming onto an existing statistic_id is refused by
-        # the recorder, so attempting it when occupied would just fail
-        # (loudly, every poll) instead of no-op'ing quietly.
-        # statistic_ids and statistic_source can't be combined (the recorder
-        # treats that as mutually exclusive) — harmless to drop the source
-        # filter since we already scope to exactly the IDs we're checking.
-        all_ids = set(legacy_ids) | set(legacy_ids.values())
-        existing_metadata = await get_instance(self.hass).async_add_executor_job(
-            partial(get_metadata, self.hass, statistic_ids=all_ids)
-        )
-        for legacy_id, new_id in legacy_ids.items():
-            if legacy_id not in existing_metadata:
-                continue
-
-            if new_id in existing_metadata:
-                if legacy_id not in self._migration_collision_warned:
-                    self._migration_collision_warned.add(legacy_id)
-                    _LOGGER.warning(
-                        "Statistics exist under both the legacy id %s and the "
-                        "new id %s — not renaming, since that would either be "
-                        "refused or silently discard one series. This id pair "
-                        "won't be retried again this session; if the two "
-                        "series need reconciling, do so manually (e.g. via "
-                        "Developer Tools > Statistics) and reload the "
-                        "integration",
-                        legacy_id,
-                        new_id,
-                    )
-                continue
-
-            _LOGGER.info(
-                "Migrating statistics from legacy id %s to %s", legacy_id, new_id
-            )
-            async_update_statistics_metadata(
-                self.hass, legacy_id, new_statistic_id=new_id
-            )
 
     async def _update_statistics(self, pod_ids: list[str]) -> bool:
         """Import statistics for all configured PODs, serialized against
@@ -286,7 +221,6 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         scheduled poll can otherwise overlap on the same statistics).
         """
         async with self._stats_lock:
-            await self._migrate_statistic_ids(pod_ids)
             return await self._update_statistics_locked(pod_ids)
 
     async def _update_statistics_locked(self, pod_ids: list[str]) -> bool:
@@ -303,7 +237,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
             pod_name = pod_name_mapping.get(pod_id, pod_id)
 
             for sensor_type in ENABLED_SENSOR_TYPES:
-                statistic_id = self._build_statistic_id(pod_id, sensor_type)
+                statistic_id = self._build_statistic_id(pod_name, sensor_type)
 
                 last_stats_result = await get_instance(
                     self.hass
@@ -464,11 +398,14 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Fetch cumulative totals from external statistics."""
         for pod_id, pod_data in pod_data_dict.items():
+            pod_name_mapping = self.config.get(CONF_POD_NAME_MAPPING, {})
+            pod_name = pod_name_mapping.get(pod_id, pod_id)
+
             if "cumulative_totals" not in pod_data:
                 pod_data["cumulative_totals"] = {}
 
             for sensor_type in ENABLED_SENSOR_TYPES:
-                statistic_id = self._build_statistic_id(pod_id, sensor_type)
+                statistic_id = self._build_statistic_id(pod_name, sensor_type)
 
                 last_stats = await get_instance(self.hass).async_add_executor_job(
                     get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}

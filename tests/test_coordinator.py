@@ -24,7 +24,6 @@ def _make_coordinator(api_client, config):
     coordinator.pods = {}
     coordinator._last_successful_data_date = None
     coordinator._stats_lock = asyncio.Lock()
-    coordinator._migration_collision_warned = set()
     coordinator.data = None
     return coordinator
 
@@ -105,133 +104,37 @@ class TestStatisticsBackfillFailureHandling:
 
 
 class TestStatisticIdKeying:
-    """Regression tests: statistic_id must be derived from the stable pod_id,
-    never the user-editable friendly name (renaming a POD must not orphan
-    its previously-imported statistics)."""
+    """statistic_id is derived from the user-editable friendly POD name
+    (falling back to pod_id when no friendly name is set). This is a
+    deliberate, currently-accepted limitation, not an oversight: an
+    earlier pod_id-keyed design (with a rename-on-upgrade migration path)
+    ran into a Home Assistant core limitation where the statistics-rename
+    primitive silently no-ops for external, non-recorder-source statistics
+    like ours, making that migration path unsafe. Since no published
+    version of this integration has ever used a different scheme, there is
+    nothing to migrate, so the simpler friendly-name-based scheme was kept.
+    Renaming a POD's friendly name does start a fresh statistics series —
+    documented, not silently handled."""
 
-    def test_statistic_id_is_stable_across_friendly_name_changes(self):
+    def test_statistic_id_derives_from_friendly_name(self):
+        assert (
+            SsdImsDataCoordinator._build_statistic_id("Home", "actual_consumption")
+            == "ssd_ims:home_actual_consumption"
+        )
+
+    def test_statistic_id_changes_when_friendly_name_changes(self):
+        before = SsdImsDataCoordinator._build_statistic_id("Home", "actual_consumption")
+        after = SsdImsDataCoordinator._build_statistic_id(
+            "Cottage", "actual_consumption"
+        )
+        assert before != after
+
+    def test_statistic_id_falls_back_to_pod_id_without_a_friendly_name(self):
         pod_id = "99XXX1234560000G"
-        assert SsdImsDataCoordinator._build_statistic_id(
-            pod_id, "actual_consumption"
-        ) == SsdImsDataCoordinator._build_statistic_id(pod_id, "actual_consumption")
         assert (
             SsdImsDataCoordinator._build_statistic_id(pod_id, "actual_consumption")
             == "ssd_ims:99xxx1234560000g_actual_consumption"
         )
-
-    async def test_migrate_statistic_ids_renames_legacy_metadata(self):
-        pod_id = "pod_1"
-        legacy_id = "ssd_ims:home_actual_consumption"
-        new_id = "ssd_ims:pod_1_actual_consumption"
-
-        coordinator = _make_coordinator(
-            MagicMock(), {CONF_POD_NAME_MAPPING: {pod_id: "Home"}}
-        )
-
-        with (
-            patch(
-                "custom_components.ssd_ims.coordinator.get_instance"
-            ) as mock_get_instance,
-            patch(
-                "custom_components.ssd_ims.coordinator.get_metadata"
-            ) as mock_get_metadata,
-            patch(
-                "custom_components.ssd_ims.coordinator.async_update_statistics_metadata"
-            ) as mock_rename,
-        ):
-            mock_instance = MagicMock()
-            mock_instance.async_add_executor_job = AsyncMock(side_effect=_run_executor)
-            mock_get_instance.return_value = mock_instance
-            # Only the actual_consumption legacy id has been imported before;
-            # actual_supply has never existed under the legacy name.
-            mock_get_metadata.return_value = {legacy_id: (1, MagicMock())}
-
-            await coordinator._migrate_statistic_ids([pod_id])
-
-        mock_rename.assert_called_once_with(
-            coordinator.hass, legacy_id, new_statistic_id=new_id
-        )
-
-    async def test_migrate_statistic_ids_skips_collision_and_warns_once(self, caplog):
-        """If both the legacy id and the new id already have their own
-        data (e.g. from an in-place upgrade that independently backfilled
-        the new id before a migration could run), renaming would either be
-        refused by the recorder or silently discard one series. Skip it,
-        warn once, and don't re-warn on a later call for the same id."""
-        pod_id = "pod_1"
-        legacy_id = "ssd_ims:home_actual_consumption"
-
-        coordinator = _make_coordinator(
-            MagicMock(), {CONF_POD_NAME_MAPPING: {pod_id: "Home"}}
-        )
-
-        with (
-            patch(
-                "custom_components.ssd_ims.coordinator.get_instance"
-            ) as mock_get_instance,
-            patch(
-                "custom_components.ssd_ims.coordinator.get_metadata"
-            ) as mock_get_metadata,
-            patch(
-                "custom_components.ssd_ims.coordinator.async_update_statistics_metadata"
-            ) as mock_rename,
-        ):
-            mock_instance = MagicMock()
-            mock_instance.async_add_executor_job = AsyncMock(side_effect=_run_executor)
-            mock_get_instance.return_value = mock_instance
-            # Both the legacy id and the new id already have metadata.
-            mock_get_metadata.return_value = {
-                legacy_id: (1, MagicMock()),
-                "ssd_ims:pod_1_actual_consumption": (2, MagicMock()),
-                "ssd_ims:pod_1_actual_supply": (3, MagicMock()),
-            }
-
-            with caplog.at_level("WARNING"):
-                await coordinator._migrate_statistic_ids([pod_id])
-                await coordinator._migrate_statistic_ids([pod_id])
-
-        mock_rename.assert_not_called()
-        collision_warnings = [r for r in caplog.records if "not renaming" in r.message]
-        assert len(collision_warnings) == 1
-
-    async def test_migrate_statistic_ids_skips_when_no_legacy_metadata_exists(self):
-        """A fresh install (or one already migrated) has nothing to rename."""
-        pod_id = "pod_1"
-        coordinator = _make_coordinator(
-            MagicMock(), {CONF_POD_NAME_MAPPING: {pod_id: "Home"}}
-        )
-
-        with (
-            patch(
-                "custom_components.ssd_ims.coordinator.get_instance"
-            ) as mock_get_instance,
-            patch(
-                "custom_components.ssd_ims.coordinator.get_metadata",
-                return_value={},
-            ),
-            patch(
-                "custom_components.ssd_ims.coordinator.async_update_statistics_metadata"
-            ) as mock_rename,
-        ):
-            mock_instance = MagicMock()
-            mock_instance.async_add_executor_job = AsyncMock(side_effect=_run_executor)
-            mock_get_instance.return_value = mock_instance
-
-            await coordinator._migrate_statistic_ids([pod_id])
-
-        mock_rename.assert_not_called()
-
-    async def test_migrate_statistic_ids_noop_when_no_friendly_name_set(self):
-        """When pod_name_mapping has no entry, legacy id already equals the new
-        id, so no recorder lookup/rename should happen at all."""
-        pod_id = "pod_1"
-        coordinator = _make_coordinator(MagicMock(), {CONF_POD_NAME_MAPPING: {}})
-
-        with patch(
-            "custom_components.ssd_ims.coordinator.get_instance"
-        ) as mock_get_instance:
-            await coordinator._migrate_statistic_ids([pod_id])
-            mock_get_instance.assert_not_called()
 
 
 class TestPodDiscovery:

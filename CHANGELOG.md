@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 2.2.4
+
+- **Internal**: Reverted the pod_id-keyed statistic ID scheme (introduced in 2.1.7, with collision-handling added in 2.2.3) back to the original friendly-name-based one from before 2.1.7. The migration path it depended on — renaming a legacy, friendly-name-based statistic onto the new pod_id-based id, preserving history — turned out to be fundamentally broken: Home Assistant core's `recorder.statistics.async_update_statistics_metadata` filters its rename query by the recorder's own hardcoded internal domain (`"recorder"`), so it silently matches zero rows for external, non-recorder-source statistics like ours (`source="ssd_ims"`) — no error is raised, the rename just quietly does nothing. Every "successful" migration observed during manual testing was actually this no-op, immediately followed by the coordinator creating a brand new, empty-starting duplicate series under the intended id.
+
+  This affected the 2.2.3 collision-handling fix too: it was addressing symptoms of this same underlying no-op, not a genuine race condition. Since no published version of this integration has ever shipped the pod_id scheme, there is no installed base that would need migrating, so — rather than building a correct migration around the recorder's `clear_statistics` + re-import primitives (which *do* work for external statistics) — the simpler, already-proven friendly-name-based scheme from before 2.1.7 was restored instead. Renaming a POD's friendly name still starts a fresh statistics series under a new id, as it always has prior to 2.1.7; this is a known, accepted limitation, not regression
+
 ## Version 2.2.3
 
 Found by actually running this branch against a real Home Assistant instance and a real SSD IMS account via `make docker-up` — three real bugs surfaced that no unit test caught, because each one only manifests against real HA machinery (the real recorder, real sensor entity validation) that the existing tests mocked away.

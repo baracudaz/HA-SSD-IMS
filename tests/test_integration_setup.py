@@ -1,10 +1,10 @@
-"""End-to-end setup tests that exercise real Home Assistant machinery
-(the real recorder, the real sensor entity platform) rather than mocking
-it away. Two real bugs (a recorder API incompatibility in
-_migrate_statistic_ids, and an invalid sensor state_class for the ENERGY
-device class) were only ever caught by running the integration in a real
-Home Assistant instance — every existing unit test mocked the exact pieces
-that would have caught them. These tests close that gap.
+"""End-to-end setup tests that exercise real Home Assistant machinery (the
+real recorder, the real sensor entity platform) rather than mocking it
+away. A real bug — an invalid sensor state_class for the ENERGY device
+class — was only ever caught by running the integration in a real Home
+Assistant instance; every unit test mocked away the exact piece (real
+entity-platform validation) that would have caught it. This test closes
+that gap.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -51,11 +51,7 @@ async def test_full_setup_against_real_recorder_and_sensor_platform(
 ):
     """A real config entry, set up through hass.config_entries against the
     real recorder and real sensor platform, with only the network-facing
-    API client mocked. A friendly name that differs from the POD id forces
-    _migrate_statistic_ids to actually call the real recorder's
-    get_metadata — the exact call that broke against a newer HA release
-    (statistic_ids combined with statistic_source became mutually
-    exclusive). Real sensor entities being added also exercises HA's
+    API client mocked. Real sensor entities being added exercises HA's
     device_class/state_class compatibility validation, which the
     MEASUREMENT state class on the Yesterday sensor failed for the ENERGY
     device class.
@@ -95,9 +91,5 @@ async def test_full_setup_against_real_recorder_and_sensor_platform(
     log_text = caplog.text
     assert "impossible" not in log_text, (
         "sensor state_class incompatible with its device_class"
-    )
-    assert "mutually exclusive" not in log_text, (
-        "_migrate_statistic_ids called the recorder with an invalid "
-        "statistic_ids/statistic_source combination"
     )
     assert "Traceback" not in log_text, f"unexpected error during setup:\n{log_text}"
