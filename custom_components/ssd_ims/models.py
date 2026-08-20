@@ -69,31 +69,6 @@ class PointOfDelivery(BaseModel):
         )
 
 
-class MeteringDataRow(BaseModel):
-    """Individual metering data row."""
-
-    values: list[Any]
-
-
-class MeteringDataResponse(BaseModel):
-    """Metering data response model."""
-
-    columns: list[dict[str, Any]]
-    rows: list[MeteringDataRow]
-    page: dict[str, Any] | None = None
-
-
-class MeteringData(BaseModel):
-    """Processed metering data point."""
-
-    metering_datetime: datetime
-    period: int
-    actual_consumption: float | None = None
-    actual_supply: float | None = None
-    idle_consumption: float | None = None
-    idle_supply: float | None = None
-
-
 class ChartData(BaseModel):
     """Summary chart data model."""
 

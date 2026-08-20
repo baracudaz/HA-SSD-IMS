@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import random
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -24,7 +24,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.util import dt as dt_util
 
-from .api_client import SsdImsApiClient
+from .api_client import SsdImsApiClient, SsdImsAuthenticationError
 from .const import (
     API_DELAY_MAX,
     API_DELAY_MIN,
@@ -208,8 +208,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
 
     def _get_random_api_delay(self) -> float:
         """Get random API delay."""
-        delay = random.uniform(API_DELAY_MIN, API_DELAY_MAX)
-        return max(0.3, delay)
+        return random.uniform(API_DELAY_MIN, API_DELAY_MAX)
 
     @staticmethod
     def _build_statistic_id(pod_id: str, sensor_type: str) -> str:
@@ -352,8 +351,11 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
 
                     try:
                         await asyncio.sleep(self._get_random_api_delay())
+                        # Convert to UTC before calling the API, matching
+                        # helpers.calculate_yesterday_range — day_start/day_end
+                        # themselves stay local for the comparisons below.
                         chart_data = await self.api_client.get_chart_data(
-                            pod_id, day_start, day_end
+                            pod_id, day_start.astimezone(UTC), day_end.astimezone(UTC)
                         )
 
                         if not chart_data or not chart_data.metering_datetime:
@@ -466,24 +468,29 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         """Discover points of delivery."""
         try:
             pods = await self.api_client.get_points_of_delivery()
-            if not pods:
-                raise RuntimeError("No points of delivery found")
+        except SsdImsAuthenticationError as e:
+            raise ConfigEntryAuthFailed(
+                "Authentication failed during POD discovery"
+            ) from e
 
-            self.pods = {pod.id: pod for pod in pods}
-        except Exception as e:
-            error_msg = str(e)
-            if any(
-                auth_error in error_msg.lower()
-                for auth_error in [
-                    "not authenticated",
-                    "authentication failed",
-                    "session expired",
-                ]
-            ):
-                raise ConfigEntryAuthFailed(
-                    "Authentication failed during POD discovery"
-                ) from e
-            raise
+        if not pods:
+            raise RuntimeError("No points of delivery found")
+
+        self.pods = {}
+        for pod in pods:
+            try:
+                self.pods[pod.id] = pod
+            except ValueError as e:
+                # A single POD with an unparseable text field must not take
+                # down discovery for every other (valid) POD.
+                _LOGGER.warning(
+                    "Skipping POD with invalid ID format: %s - %s", pod.text, e
+                )
+
+        # Seed the API client's own POD cache so it doesn't need a redundant
+        # re-fetch the next time it resolves a stable POD id (e.g. during a
+        # long-running statistics backfill).
+        self.api_client.set_cached_pods(list(self.pods.values()))
 
     def _aggregate_data(
         self, chart_data_by_period: dict[str, ChartData]

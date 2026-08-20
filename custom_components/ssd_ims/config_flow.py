@@ -9,6 +9,7 @@ from aiohttp import ClientError
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -64,12 +65,19 @@ class SsdImsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 api_client = SsdImsApiClient(async_get_clientsession(self.hass))
                 if await api_client.authenticate(self._username, self._password):
+                    await self.async_set_unique_id(self._username.lower())
+                    self._abort_if_unique_id_configured()
                     self._pods = await api_client.get_points_of_delivery()
                     return await self.async_step_point_of_delivery()
                 else:
                     errors["base"] = "invalid_auth"
-            except Exception as e:
+            except AbortFlow:
+                raise
+            except (ClientError, asyncio.TimeoutError, RuntimeError) as e:
                 _LOGGER.error("Error during authentication: %s", e)
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected error during authentication")
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(

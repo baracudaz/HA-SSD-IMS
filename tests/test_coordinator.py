@@ -4,11 +4,14 @@ import asyncio
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.util import dt as dt_util
 
+from custom_components.ssd_ims.api_client import SsdImsAuthenticationError
 from custom_components.ssd_ims.const import CONF_HISTORY_DAYS, CONF_POD_NAME_MAPPING
 from custom_components.ssd_ims.coordinator import SsdImsDataCoordinator
-from custom_components.ssd_ims.models import ChartData
+from custom_components.ssd_ims.models import ChartData, PointOfDelivery
 
 
 def _make_coordinator(api_client, config):
@@ -186,3 +189,39 @@ class TestStatisticIdKeying:
         ) as mock_get_instance:
             await coordinator._migrate_statistic_ids([pod_id])
             mock_get_instance.assert_not_called()
+
+
+class TestPodDiscovery:
+    """Regression tests for _discover_pods robustness."""
+
+    async def test_pod_with_invalid_id_is_skipped_not_fatal(self):
+        """A single POD whose text can't be parsed into a stable ID must not
+        take down discovery for every other, valid POD."""
+        valid_pod = PointOfDelivery(text="99XXX1234560000G (Home)", value="v1")
+        invalid_pod = PointOfDelivery(text="not-a-valid-pod-id", value="v2")
+
+        api_client = MagicMock()
+        api_client.get_points_of_delivery = AsyncMock(
+            return_value=[valid_pod, invalid_pod]
+        )
+        api_client.set_cached_pods = MagicMock()
+
+        coordinator = _make_coordinator(api_client, {})
+
+        await coordinator._discover_pods()
+
+        assert list(coordinator.pods.keys()) == [valid_pod.id]
+        api_client.set_cached_pods.assert_called_once_with([valid_pod])
+
+    async def test_authentication_error_becomes_config_entry_auth_failed(self):
+        """A typed auth failure from the API client must be translated into
+        ConfigEntryAuthFailed, not left to fragile string matching."""
+        api_client = MagicMock()
+        api_client.get_points_of_delivery = AsyncMock(
+            side_effect=SsdImsAuthenticationError("Not authenticated")
+        )
+
+        coordinator = _make_coordinator(api_client, {})
+
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coordinator._discover_pods()

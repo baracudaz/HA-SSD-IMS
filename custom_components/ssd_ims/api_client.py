@@ -8,16 +8,23 @@ from typing import Any
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from pydantic import ValidationError
 
-from .const import API_CHART, API_DATA, API_LOGIN, API_PODS, PODS_CACHE_TTL
-from .models import (
-    AuthResponse,
-    ChartData,
-    MeteringData,
-    MeteringDataResponse,
-    PointOfDelivery,
-)
+from .const import API_CHART, API_LOGIN, API_PODS, PODS_CACHE_TTL
+from .models import AuthResponse, ChartData, PointOfDelivery
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class SsdImsAuthenticationError(RuntimeError):
+    """Raised when a request fails because the session/credentials are no
+    longer valid, as opposed to a network or server-side problem.
+
+    Callers can catch this specifically to distinguish "you need to log in
+    again" from transient failures that should just be retried.
+    """
+
+
+class SsdImsServerError(RuntimeError):
+    """Raised for a 5xx response from the portal — treated as retryable."""
 
 
 def _log_data_sample(
@@ -82,44 +89,45 @@ class SsdImsApiClient:
         self._pods_cache_ts: datetime | None = None
 
     async def authenticate(self, username: str, password: str) -> bool:
-        """Authenticate with SSD IMS portal."""
-        try:
-            # Store credentials for re-authentication
-            self._username = username
-            self._password = password
+        """Authenticate with SSD IMS portal.
 
-            payload = {"username": username, "password": password}
+        Returns False only when the portal itself rejects the credentials
+        (401/403). Network errors, timeouts, and unexpected/invalid
+        responses are raised instead of being folded into False, so callers
+        can tell "wrong password" apart from "couldn't reach the portal"
+        (e.g. ConfigEntryAuthFailed vs. ConfigEntryNotReady).
+        """
+        # Store credentials for re-authentication
+        self._username = username
+        self._password = password
 
-            async with self._session.post(
-                API_LOGIN, json=payload, timeout=self._timeout
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    AuthResponse(**data)  # Validate response structure
-                    self._authenticated = True
+        payload = {"username": username, "password": password}
 
-                    # Extract session token from cookies
-                    self._session_token = self._extract_session_token(response)
-                    if self._session_token:
-                        _LOGGER.debug(
-                            "Session token extracted (length=%d)",
-                            len(self._session_token),
-                        )
-                    else:
-                        _LOGGER.warning("No session token found in response cookies")
+        async with self._session.post(
+            API_LOGIN, json=payload, timeout=self._timeout
+        ) as response:
+            if response.status in (401, 403):
+                _LOGGER.error("Authentication failed: %s", response.status)
+                return False
 
-                    _LOGGER.info("Authentication successful for user: %s", username)
-                    return True
-                else:
-                    _LOGGER.error("Authentication failed: %s", response.status)
-                    return False
+            if response.status != 200:
+                raise RuntimeError(f"Unexpected login response: {response.status}")
 
-        except ClientError as e:
-            _LOGGER.error("Network error during authentication: %s", e)
-            return False
-        except Exception as e:
-            _LOGGER.error("Unexpected error during authentication: %s", e)
-            return False
+            data = await response.json()
+            AuthResponse(**data)  # Validate response structure
+            self._authenticated = True
+
+            # Extract session token from cookies
+            self._session_token = self._extract_session_token(response)
+            if self._session_token:
+                _LOGGER.debug(
+                    "Session token extracted (length=%d)", len(self._session_token)
+                )
+            else:
+                _LOGGER.warning("No session token found in response cookies")
+
+            _LOGGER.info("Authentication successful for user: %s", username)
+            return True
 
     def _extract_session_token(self, response) -> str | None:
         """Extract SsdAccessToken from response cookies."""
@@ -177,13 +185,13 @@ class SsdImsApiClient:
         for attempt in range(max_retries):
             try:
                 return await self._make_authenticated_request(method, url, **kwargs)
-            except ClientError as e:
+            except (ClientError, SsdImsServerError) as e:
                 if attempt == max_retries - 1:
                     raise
 
                 wait_time = 2**attempt  # exponential backoff: 1s, 2s, 4s
                 _LOGGER.warning(
-                    "Network error on attempt %d/%d for %s: %s. Retrying in %ds...",
+                    "Transient error on attempt %d/%d for %s: %s. Retrying in %ds...",
                     attempt + 1,
                     max_retries,
                     url,
@@ -192,13 +200,26 @@ class SsdImsApiClient:
                 )
                 await asyncio.sleep(wait_time)
             except Exception:
-                # Don't retry non-network errors
+                # Don't retry auth failures or other non-transient errors
                 raise
+
+    @staticmethod
+    def _raise_for_status(status: int, context: str = "") -> None:
+        """Raise a typed exception for a non-200 response status."""
+        if status == 401:
+            raise SsdImsAuthenticationError(f"Authentication required{context}")
+        if status == 403:
+            raise RuntimeError(f"Access forbidden - check permissions{context}")
+        if status == 404:
+            raise RuntimeError(f"API endpoint not found{context}")
+        if status >= 500:
+            raise SsdImsServerError(f"Server error: {status}{context}")
+        raise RuntimeError(f"API error: {status}{context}")
 
     async def _make_authenticated_request(self, method: str, url: str, **kwargs) -> Any:
         """Make an authenticated request with automatic re-authentication on session expiry."""
         if not self._authenticated:
-            raise RuntimeError("Not authenticated")
+            raise SsdImsAuthenticationError("Not authenticated")
 
         # Add required headers for SSD IMS API compatibility
         headers = dict(kwargs.get("headers", {}))
@@ -221,30 +242,20 @@ class SsdImsApiClient:
                     ) as retry_response:
                         if retry_response.status == 200:
                             return await retry_response.json()
-                        else:
-                            raise RuntimeError(
-                                f"API error after re-authentication: {retry_response.status}"
-                            )
+                        self._raise_for_status(
+                            retry_response.status, " (after re-authentication)"
+                        )
                 else:
-                    raise RuntimeError("Re-authentication failed")
+                    raise SsdImsAuthenticationError("Re-authentication failed")
 
             if response.status == 200:
                 return await response.json()
-            elif response.status == 401:
-                raise RuntimeError("Authentication required")
-            elif response.status == 403:
-                raise RuntimeError("Access forbidden - check permissions")
-            elif response.status == 404:
-                raise RuntimeError("API endpoint not found")
-            elif response.status == 500:
-                raise RuntimeError("Server error - try again later")
-            else:
-                raise RuntimeError(f"API error: {response.status}")
+            self._raise_for_status(response.status)
 
     async def get_points_of_delivery(self) -> list[PointOfDelivery]:
         """Get available points of delivery."""
         if not self._authenticated:
-            raise RuntimeError("Not authenticated")
+            raise SsdImsAuthenticationError("Not authenticated")
 
         _LOGGER.debug("Fetching points of delivery from API")
         data = await self._retry_request_with_backoff("GET", API_PODS)
@@ -259,73 +270,6 @@ class SsdImsApiClient:
         _LOGGER.debug("Retrieved %d points of delivery", len(pods))
         return pods
 
-    async def get_metering_data(
-        self,
-        pod_id: str,  # Use stable pod_id instead of pod_text for stable
-        # identification
-        from_date: datetime,
-        to_date: datetime,
-        page: int = 1,
-        page_size: int = 100,
-    ) -> list[MeteringData]:
-        """Get detailed metering data for time period."""
-        if not self._authenticated:
-            raise RuntimeError("Not authenticated")
-
-        # First, get current session POD ID for this stable pod_id
-        session_pod_id = await self._get_session_pod_id_by_stable_id(pod_id)
-        if not session_pod_id:
-            raise RuntimeError(f"POD not found for stable ID: {pod_id}")
-
-        payload = {
-            "page": {"totalRows": 96, "currentPage": page, "pageSize": page_size},
-            "filters": [
-                {
-                    "member": "pointOfDeliveryId",
-                    "operator": "Equals",
-                    "type": "Int",
-                    "value": session_pod_id,
-                },
-                {
-                    "member": "meteringDatetime",
-                    "operator": "Greater",
-                    "type": "DateTimeMilliseconds",
-                    "value": from_date.isoformat(),
-                    "rangeOperator": "LowerOrEquals",
-                    "rangeValue": to_date.isoformat(),
-                },
-            ],
-            "sort": [{"member": "meteringDatetime", "sortOrder": "asc"}],
-            "isExport": False,
-        }
-
-        data = await self._retry_request_with_backoff("POST", API_DATA, json=payload)
-        response_model = MeteringDataResponse(**data)
-
-        metering_data = []
-        for row in response_model.rows:
-            values = row.values
-            if len(values) >= 10:
-                metering_data.append(
-                    MeteringData(
-                        metering_datetime=datetime.fromisoformat(
-                            values[0].replace("Z", "+00:00")
-                        ),
-                        period=values[1],
-                        actual_consumption=values[2] if values[2] is not None else None,
-                        actual_supply=values[4] if values[4] is not None else None,
-                        idle_consumption=values[6] if values[6] is not None else None,
-                        idle_supply=values[8] if values[8] is not None else None,
-                    )
-                )
-
-        _LOGGER.debug(
-            "Retrieved %d metering data points for POD %s",
-            len(metering_data),
-            pod_id,
-        )
-        return metering_data
-
     async def get_chart_data(
         self,
         pod_id: str,  # Use stable pod_id instead of pod_text for stable identification
@@ -334,7 +278,7 @@ class SsdImsApiClient:
     ) -> ChartData:
         """Get summary chart data for time period."""
         if not self._authenticated:
-            raise RuntimeError("Not authenticated")
+            raise SsdImsAuthenticationError("Not authenticated")
 
         # Efficiently get session_pod_id and pod_text in one go
         target_pod = await self._get_pod_by_stable_id(pod_id)
@@ -426,6 +370,18 @@ class SsdImsApiClient:
                 _LOGGER.error("  %s: %s", field, sample_info)
             raise RuntimeError(f"Chart data validation failed: {str(e)}") from e
 
+    def set_cached_pods(self, pods: list[PointOfDelivery]) -> None:
+        """Seed the POD cache from an already-known, freshly discovered list.
+
+        Lets a caller that already just called get_points_of_delivery()
+        (e.g. the coordinator on startup) avoid a redundant API round-trip
+        the next time this client needs to resolve a stable POD id — useful
+        during a long-running statistics backfill, which can otherwise
+        outlast PODS_CACHE_TTL and trigger repeated re-discovery.
+        """
+        self._pods_cache = pods
+        self._pods_cache_ts = datetime.now(UTC)
+
     def _is_pods_cache_valid(self) -> bool:
         """Return True when the cached POD list is still valid."""
         if not self._pods_cache or not self._pods_cache_ts:
@@ -442,26 +398,3 @@ class SsdImsApiClient:
         """Return POD details by stable ID."""
         pods = await self._get_cached_pods()
         return next((pod for pod in pods if pod.id == pod_id), None)
-
-    async def _get_session_pod_id_by_stable_id(self, pod_id: str) -> str | None:
-        """Get current session POD ID for a stable POD ID."""
-        target_pod = await self._get_pod_by_stable_id(pod_id)
-        return target_pod.value if target_pod else None
-
-    @property
-    def is_authenticated(self) -> bool:
-        """Check if client is authenticated."""
-        return self._authenticated
-
-    @property
-    def session_token(self) -> str | None:
-        """Get current session token."""
-        return self._session_token
-
-    def logout(self) -> None:
-        """Logout and clear authentication state."""
-        self._authenticated = False
-        self._session_token = None
-        self._username = None
-        self._password = None
-        _LOGGER.debug("Logged out from SSD IMS")

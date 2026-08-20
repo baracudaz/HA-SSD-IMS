@@ -117,7 +117,6 @@ class SsdImsEnergySensor(SsdImsSensor):
         self.period = period
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     def _generate_sensor_name(self, suffix: str) -> str:
         """Generate sensor name based on type and suffix."""
@@ -140,6 +139,13 @@ class SsdImsYesterdaySensor(SsdImsEnergySensor):
     ) -> None:
         """Initialize yesterday sensor."""
         super().__init__(coordinator, sensor_type, period, pod_id, friendly_name)
+        # This is a self-contained daily snapshot, replaced once a day, and
+        # can legitimately be lower than the previous day's value — not a
+        # running total. TOTAL_INCREASING would make HA generate its own
+        # long-term "sum" statistics for this entity, duplicating (and
+        # potentially conflicting with) the external statistics the
+        # coordinator writes directly for the Energy dashboard.
+        self._attr_state_class = SensorStateClass.MEASUREMENT
 
         sensor_name = self._generate_sensor_name("Yesterday")
         sanitized_sensor_name = sanitize_name(sensor_name)
@@ -172,6 +178,9 @@ class SsdImsCumulativeSensor(SsdImsEnergySensor):
     ) -> None:
         """Initialize cumulative sensor."""
         super().__init__(coordinator, sensor_type, "", pod_id, friendly_name)
+        # This one genuinely mirrors an ever-increasing running total read
+        # back from the coordinator's own statistics.
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
         sensor_name = self._generate_sensor_name("Total")
         sanitized_sensor_name = sanitize_name(sensor_name)

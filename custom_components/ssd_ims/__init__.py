@@ -2,10 +2,14 @@
 
 import logging
 import re
+
+from aiohttp import ClientError
+from pydantic import ValidationError
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_client import SsdImsApiClient
@@ -47,7 +51,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: SsdImsConfigEntry) -> bo
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
 
-    if not await api_client.authenticate(username, password):
+    try:
+        authenticated = await api_client.authenticate(username, password)
+    except (ClientError, TimeoutError, RuntimeError, ValidationError) as err:
+        # Network/timeout/server/unexpected-response problems are transient
+        # or portal-side, not proof the credentials are wrong — let HA retry
+        # instead of forcing the user through a spurious reauth flow.
+        raise ConfigEntryNotReady(f"Cannot connect to SSD IMS: {err}") from err
+
+    if not authenticated:
         raise ConfigEntryAuthFailed("Authentication failed for SSD IMS")
 
     # entry.options takes precedence over entry.data for user-adjustable settings

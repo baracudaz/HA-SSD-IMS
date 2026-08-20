@@ -35,8 +35,10 @@ SCAN_INTERVAL_OPTIONS: Final = {
 API_DELAY_MIN: Final = 1  # minimum random delay in seconds
 API_DELAY_MAX: Final = 3  # maximum random delay in seconds
 
-# POD cache TTL
-PODS_CACHE_TTL: Final = timedelta(minutes=5)
+# POD cache TTL - the coordinator seeds this cache right after discovery
+# (see SsdImsApiClient.set_cached_pods), so this mainly bounds how long a
+# long-running statistics backfill can go before PODs are re-discovered.
+PODS_CACHE_TTL: Final = timedelta(minutes=60)
 
 # API endpoints
 API_BASE_URL: Final = "https://ims.ssd.sk/api"
@@ -44,7 +46,6 @@ API_LOGIN: Final = f"{API_BASE_URL}/account/login"
 API_PODS: Final = (
     f"{API_BASE_URL}/consumption-production/profile-data/get-points-of-delivery"
 )
-API_DATA: Final = f"{API_BASE_URL}/consumption-production/profile-data"
 API_CHART: Final = f"{API_BASE_URL}/consumption-production/profile-data/chart-data"
 
 # Sensor types
@@ -67,4 +68,3 @@ PERIOD_YESTERDAY: Final = "yesterday"
 
 # POD naming validation
 POD_NAME_MAX_LENGTH: Final = 50
-POD_NAME_PATTERN: Final = r"^[a-zA-Z0-9_]+$"  # alphanumeric + underscores only

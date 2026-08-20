@@ -47,7 +47,7 @@
       "cannot_connect": "Cannot connect to SSD IMS portal",
       "no_pods_selected": "Please select at least one Point of Delivery",
       "invalid_format": "Name must contain at least one letter or number",
-      "too_long": "Name is too long (maximum 32 characters)",
+      "too_long": "Name is too long (maximum 50 characters)",
       "duplicate_name": "This name is already used for another POD"
     },
     "abort": {

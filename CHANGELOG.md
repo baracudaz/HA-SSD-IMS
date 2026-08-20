@@ -1,5 +1,19 @@
 # Changelog
 
+## Version 2.1.8
+
+- **Bug fix**: Network errors, timeouts, and unexpected responses during login were reported the same way as wrong credentials, forcing a spurious reauthentication prompt instead of a transparent retry. Authentication failures are now raised distinctly from actual credential rejection, so setup correctly raises `ConfigEntryNotReady` (retried automatically) instead of `ConfigEntryAuthFailed` for transient connectivity issues
+- **Bug fix**: The statistics backfill's day boundaries were computed in local time and sent to the portal unconverted, while the "yesterday" sensors' boundaries were converted to UTC first — an inconsistency that could shift which readings landed in which day around DST transitions. Both now convert to UTC consistently
+- **Bug fix**: A single POD whose text couldn't be parsed into a stable ID (e.g. after a portal-side format change) aborted discovery for every configured POD. It's now skipped individually, with the rest discovered normally
+- **Bug fix**: Server errors (5xx) were not retried despite the error message claiming they would be; they're now treated as transient and retried with the same backoff as network errors
+- **Bug fix**: The `too_long` POD name validation message said "maximum 32 characters" while the actual configured limit is 50; the message now matches
+- **Bug fix**: The "Yesterday" sensors used the `total_increasing` state class, which is only correct for a genuinely monotonic running total. Since this sensor is a daily snapshot that can legitimately be lower than the previous day, that state class made Home Assistant auto-generate its own long-term statistics for the entity — a second, redundant series alongside the one this integration writes directly. It's now `measurement`; the cumulative total sensors keep `total_increasing`, which is correct for them
+- **Bug fix**: Authentication-failure detection during POD discovery matched substrings of exception messages, which would silently break if those messages were ever reworded. It's now based on a dedicated exception type
+- **Bug fix**: Diagnostics downloads included the raw POD ID (a utility meter number) and any friendly name set for a POD, which the setup flow's own guidance suggests filling in with a home address. Both are now redacted/anonymized in the diagnostics payload
+- **New feature**: Adding the same SSD IMS account as a second config entry is no longer allowed
+- **Internal**: Removed unused code: `get_metering_data` and its supporting models, and the `session_token`/`is_authenticated`/`logout()` API client members, none of which were called anywhere in the integration
+- **Internal**: The API client's internal POD cache is now seeded from the coordinator's own discovery result and its TTL raised from 5 to 60 minutes, avoiding redundant POD re-fetches during a long-running statistics backfill
+
 ## Version 2.1.7
 
 - **Bug fix**: A single day that failed to fetch or process partway through the statistics backfill range was previously skipped over silently, and if the final day still succeeded the whole range was marked complete — permanently understating the cumulative energy total from that point on, since the next poll resumes from the last successfully persisted day. A failed day now stops the backfill walk for that POD/sensor and is retried on the next poll instead of being silently dropped
