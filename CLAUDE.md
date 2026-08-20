@@ -1,0 +1,64 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A Home Assistant custom integration (HACS) for the SSD IMS energy portal (`https://ims.ssd.sk`). It logs into the portal, discovers Points of Delivery (PODs), and imports hourly consumption/supply data into Home Assistant's long-term statistics for the Energy dashboard. All integration code lives in `custom_components/ssd_ims/`.
+
+## Commands
+
+```bash
+make install         # create .venv and install requirements.txt + pytest-asyncio
+make format           # ruff format .
+make lint             # ruff check . --fix
+make check            # format --check + lint, no auto-fix (what CI runs)
+make test             # pytest tests/ -v --asyncio-mode=auto
+make dev              # format + lint + test
+
+make docker-up        # start a real Home Assistant instance in Docker with this
+                       # integration mounted, for manual/UI testing
+make docker-logs
+make docker-down
+```
+
+Run a single test: `.venv/bin/python -m pytest tests/test_api_client.py::TestSsdImsApiClient::TestAuthentication::test_successful_authentication -v`
+
+`asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions don't need `@pytest.mark.asyncio`.
+
+`scripts/develop` runs Home Assistant directly (non-Docker) against `./config`, with `custom_components/` on `PYTHONPATH`.
+
+CI (`.github/workflows/lint.yml`) runs `ruff check .` and `ruff format . --check` on every push/PR to `master`. `.github/workflows/validate.yml` runs `hassfest` and the HACS validation action — both check integration structure/metadata (`manifest.json`, `hacs.json`), not code logic.
+
+## Architecture
+
+Standard Home Assistant config-entry integration, coordinator-based:
+
+- **`api_client.py`** — `SsdImsApiClient` wraps the SSD IMS REST API (login, POD discovery, chart/metering data). Handles session-cookie auth (`SsdAccessToken`), transparent re-authentication when a session expires (detected via 401 or an HTML response body where JSON was expected), and retry-with-backoff for network errors. Caches the POD list for `PODS_CACHE_TTL` (5 min).
+- **`coordinator.py`** — `SsdImsDataCoordinator` (`DataUpdateCoordinator`) is the only thing that talks to the API client at runtime. Each refresh:
+  1. Discovers PODs if not already cached on the coordinator.
+  2. For each configured POD and each enabled sensor type, walks day-by-day from the last imported statistic (or `history_days` back, on first run) through yesterday, fetching chart data and pushing hourly-aggregated sums into HA's external statistics via `async_add_external_statistics` (statistic id: `ssd_ims:<sanitized_pod_name>_<sensor_type>`).
+  3. Fetches "yesterday" chart data per POD for the yesterday-total sensors.
+  4. Reads back cumulative sums from HA's statistics store for the `_total` sensors.
+  - **Smart polling**: the portal publishes data once daily after midnight. Once a day's statistics are confirmed complete for every POD/sensor type, `_last_successful_data_date` is set and further scheduled polls that day are skipped entirely (`self.data` is returned unchanged) until the next calendar day. Changing options resets this gate.
+- **`__init__.py`** — `async_setup_entry` authenticates, builds the coordinator, does the first refresh, then forwards to the `sensor` platform. `async_migrate_entry` handles a v1→v2 migration converting old session-scoped POD identifiers into stable POD IDs (see below).
+- **`sensor.py`** — Creates 5 entities per configured POD: `Actual Consumption Yesterday`, `Actual Supply Yesterday`, `Actual Consumption Total`, `Actual Supply Total` (all read from `coordinator.data`), and `Last Update`. Entities don't poll themselves — they're `CoordinatorEntity` and just read whatever the coordinator last computed.
+- **`config_flow.py`** — Multi-step UI flow: credentials → POD selection → per-POD friendly naming → update interval/history-import settings. Also implements `async_step_reauth` (triggered by `ConfigEntryAuthFailed`) and `async_step_reconfigure` (same step sequence, pre-filled with current values, reusing the same account). `SsdImsOptionsFlow` only exposes the scan interval and pushes changes live via `coordinator.update_config`.
+- **`diagnostics.py`** — Redacts `CONF_USERNAME`/`CONF_PASSWORD`; exposes discovered PODs and coordinator data.
+- **`helpers.py`** — `sanitize_name` (used to build statistic IDs / unique IDs from user-supplied POD names) and `calculate_yesterday_range`.
+- **`models.py`** — Pydantic models for the portal's JSON responses.
+
+### Stable POD IDs
+
+The portal's session-scoped POD identifier (`pod.value`, sent to the API) changes between logins. `PointOfDelivery.id` extracts a stable 16–20 char alphanumeric ID by parsing it out of `pod.text` (e.g. `"99XXX1234560000G (Rodinný dom)"`). All persistent state (config entry data, statistic IDs, entity unique IDs) keys off `pod.id`, never `pod.value`. The API client resolves `pod.id` → current `pod.value` on demand via the cached POD list before each request. `async_migrate_entry` in `__init__.py` converts config entries created before this scheme existed.
+
+### Data flow gotcha
+
+The portal only ever has data through "yesterday", published once after midnight — there's no point polling more often than that. Respect the existing smart-polling gate and the `SCAN_INTERVAL_OPTIONS` (5 min is explicitly documented as "debugging only") rather than adding more frequent polling.
+
+## Conventions
+
+- Python 3.13+, Pydantic v2 for API response models, `ruff` for lint/format (no separate mypy/pylint config in this repo despite `.github/copilot-instructions.md` referencing them — that file documents Home Assistant core's own conventions and quality-scale process; only the general HA integration patterns it describes apply here, not its literal tool invocations).
+- Config-critical data (credentials, POD selection, naming) lives in `ConfigEntry.data`; only `scan_interval` is adjustable post-setup via `ConfigEntry.options`/the options flow.
+- Polling interval is user-configurable in this integration's config flow (`SCAN_INTERVAL_OPTIONS`) — this is an intentional exception to the usual HA guidance against configurable scan intervals, because the source data's daily publish cadence makes it a meaningful, bounded choice for the user.
+- `CHANGELOG.md` is maintained by hand per release, grouped under `## Version X.Y.Z` with bolded change-type prefixes (`**New feature**`, `**Bug fix**`, `**Internal**`, `**Metadata**`, `**Docs**`, `**Maintenance**`). Bump `manifest.json` `"version"` alongside changelog entries.

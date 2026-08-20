@@ -63,6 +63,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self.pods: dict[str, PointOfDelivery] = {}
         self._last_successful_data_date: date | None = None
+        self._stats_lock = asyncio.Lock()
 
         scan_interval = timedelta(
             minutes=config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -116,7 +117,21 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("No PODs configured or discovered. Skipping update.")
                 return {}
 
-            stats_complete = await self._update_statistics(pod_ids)
+            if self.data is None:
+                # First refresh (runs synchronously during config entry setup,
+                # bounded by Home Assistant's bootstrap timeout): don't block
+                # setup on a potentially large statistics backfill. Run it as
+                # a background task instead and let it — plus subsequent
+                # scheduled polls, which HA already runs in the background —
+                # catch up incrementally.
+                stats_complete = False
+                self.entry.async_create_background_task(
+                    self.hass,
+                    self._async_backfill_statistics(pod_ids),
+                    f"{DOMAIN}_initial_statistics_backfill",
+                )
+            else:
+                stats_complete = await self._update_statistics(pod_ids)
 
             all_pod_data: dict[str, Any] = {pod_id: {} for pod_id in pod_ids}
             await self._fetch_cumulative_totals_from_statistics(all_pod_data)
@@ -168,12 +183,39 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Error updating data: %s", e)
             raise UpdateFailed(f"Error updating data: {e}") from e
 
+    async def _async_backfill_statistics(self, pod_ids: list[str]) -> None:
+        """Run the statistics backfill outside the config entry setup path.
+
+        Started as a background task from the first refresh so a large
+        catch-up range can't block Home Assistant's bootstrap timeout.
+        """
+        try:
+            stats_complete = await self._update_statistics(pod_ids)
+        except Exception:
+            _LOGGER.exception("Error during background statistics backfill")
+            return
+
+        if stats_complete:
+            self._last_successful_data_date = dt_util.now().date()
+
+        # Pull the newly imported totals into coordinator.data and notify
+        # entities instead of waiting for the next scheduled poll.
+        await self.async_request_refresh()
+
     def _get_random_api_delay(self) -> float:
         """Get random API delay."""
         delay = random.uniform(API_DELAY_MIN, API_DELAY_MAX)
         return max(0.3, delay)
 
     async def _update_statistics(self, pod_ids: list[str]) -> bool:
+        """Import statistics for all configured PODs, serialized against
+        concurrent callers (the background backfill task and a regular
+        scheduled poll can otherwise overlap on the same statistics).
+        """
+        async with self._stats_lock:
+            return await self._update_statistics_locked(pod_ids)
+
+    async def _update_statistics_locked(self, pod_ids: list[str]) -> bool:
         """
         Import statistics for all configured PODs.
 
@@ -231,11 +273,22 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                 if start_date >= end_date:
                     continue
 
-                # Track whether the portal has published data for the pending dates.
-                # If no data comes back for any day in the range, the portal hasn't
-                # published yet and we should retry on the next scheduled poll.
-                got_any_data = False
-                stats_to_import = []
+                # Track whether the portal has published data through the most
+                # recent pending day (yesterday). Earlier days in the range may
+                # legitimately have data while the latest day doesn't yet, so
+                # completeness is judged on that last day specifically, not on
+                # whether any day in the range returned data.
+                last_pending_day = end_date - timedelta(days=1)
+                got_last_day_data = False
+                metadata = {
+                    "has_sum": True,
+                    "mean_type": StatisticMeanType.NONE,
+                    "name": f"{pod_name} {sensor_type.replace('_', ' ').title()}",
+                    "source": DOMAIN,
+                    "statistic_id": statistic_id,
+                    "unit_of_measurement": "kWh",
+                    "unit_class": "energy",
+                }
                 current_date = start_date
                 while current_date < end_date:
                     day_start = current_date
@@ -251,7 +304,8 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                             current_date += timedelta(days=1)
                             continue
 
-                        got_any_data = True
+                        if day_start == last_pending_day:
+                            got_last_day_data = True
                         hourly_data: dict[datetime, float] = {}
                         for i, timestamp_str in enumerate(chart_data.metering_datetime):
                             value = (
@@ -276,6 +330,7 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                                 hourly_data[hour_timestamp] = 0.0
                             hourly_data[hour_timestamp] += value * 0.25
 
+                        day_stats = []
                         for hour_timestamp, hourly_value in sorted(hourly_data.items()):
                             if (
                                 last_stat_timestamp
@@ -284,12 +339,21 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
                                 continue
 
                             cumulative_sum += hourly_value
-                            stats_to_import.append(
+                            day_stats.append(
                                 {
                                     "start": hour_timestamp,
                                     "sum": cumulative_sum,
                                 }
                             )
+
+                        # Flush after each day so progress survives a cancelled
+                        # or interrupted update instead of being redone from
+                        # scratch on the next poll.
+                        if day_stats:
+                            async_add_external_statistics(
+                                self.hass, metadata, day_stats
+                            )
+                            last_stat_timestamp = day_stats[-1]["start"]
                     except Exception as e:
                         _LOGGER.error(
                             "Failed to fetch or process data for %s on %s: %s",
@@ -300,26 +364,14 @@ class SsdImsDataCoordinator(DataUpdateCoordinator):
 
                     current_date += timedelta(days=1)
 
-                if not got_any_data:
-                    # Portal has not published data for the pending dates yet
+                if not got_last_day_data:
+                    # Portal has not published yesterday's data yet
                     _LOGGER.debug(
                         "No data available yet for %s (pending from %s) — will retry",
                         statistic_id,
                         start_date.date(),
                     )
                     all_up_to_date = False
-
-                if stats_to_import:
-                    metadata = {
-                        "has_sum": True,
-                        "mean_type": StatisticMeanType.NONE,
-                        "name": f"{pod_name} {sensor_type.replace('_', ' ').title()}",
-                        "source": DOMAIN,
-                        "statistic_id": statistic_id,
-                        "unit_of_measurement": "kWh",
-                        "unit_class": "energy",
-                    }
-                    async_add_external_statistics(self.hass, metadata, stats_to_import)
 
         return all_up_to_date
 
